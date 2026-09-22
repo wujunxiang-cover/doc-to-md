@@ -1,0 +1,29 @@
+{
+  "name": "doc-to-md",
+  "version": "1.0.0",
+  "description": "A private, cross-platform document-to-Markdown desktop app.",
+  "main": "src/main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "build": {
+    "appId": "com.doctomd.app",
+    "productName": "Doc to MD",
+    "files": ["src/**/*", "package.json"],
+    "mac": { "target": ["dmg", "zip"] },
+    "win": { "target": ["nsis", "zip"] }
+  },
+  "dependencies": {
+    "mammoth": "^1.8.0",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "electron": "^35.1.5",
+    "electron-builder": "^26.0.12"
+  }
+}

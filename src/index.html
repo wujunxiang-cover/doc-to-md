@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Doc to MD</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand"><span class="brand-mark">⌘</span><span>Doc to MD</span></div>
+      <p>把文档变成干净的 Markdown</p>
+    </header>
+    <section id="drop-zone" class="drop-zone" aria-label="上传文档">
+      <input id="file-input" type="file" accept=".docx,.txt,.md,.markdown" hidden />
+      <div class="upload-icon">↑</div>
+      <h1>拖入文档，立即转换</h1>
+      <p>支持 Word（.docx）、TXT 与 Markdown</p>
+      <div class="entry-actions"><button id="choose-file" type="button">选择文件</button><button id="write-text" class="secondary" type="button">直接输入文本</button></div>
+    </section>
+    <section id="workspace" class="workspace" hidden>
+      <div class="file-bar"><span id="file-name"></span><button id="new-file" class="quiet" type="button">重新选择</button></div>
+      <div id="warning" class="warning" hidden></div>
+      <label for="markdown">Markdown 预览与编辑</label>
+      <textarea id="markdown" spellcheck="false"></textarea>
+      <div class="actions"><span id="status" role="status"></span><button id="export" type="button">导出 .md 文件</button></div>
+    </section>
+    <footer>文件仅在你的电脑上处理，不会上传到网络。</footer>
+  </main>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>
