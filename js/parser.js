@@ -1,31 +1,40 @@
 import { emptyDocument } from './model.js';
 
 const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const safeUrl = value => /^(https?:|mailto:|\/|#)/i.test(value.trim()) ? value.trim() : '#';
+const markdownParser = new window.markdownit({html:false,linkify:true,breaks:false,typographer:false})
+  .use(window.markdownitMark).use(window.markdownitSub).use(window.markdownitSup);
 
 export function inline(text) {
-  const tokens = [];
-  const hold = html => `\u0000${tokens.push(html) - 1}\u0000`;
-  let value = esc(text);
-  value = value.replace(/`([^`]+)`/g, (_, code) => hold(`<code>${code}</code>`));
-  value = value.replace(/!\[([^\]]*)\]\(([^\s)]+)(?:\s+"([^"]*)")?\)/g, (_, alt, url, title='') => hold(`<img src="${esc(safeUrl(url))}" alt="${alt}" title="${title}">`));
-  value = value.replace(/\[([^\]]+)\]\(([^\s)]+)(?:\s+"([^"]*)")?\)/g, (_, label, url, title='') => hold(`<a href="${esc(safeUrl(url))}" title="${title}" target="_blank" rel="noopener">${label}</a>`));
-  value = value.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, (_, lead, url) => `${lead}${hold(`<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener">${url}</a>`)}`);
-  value = value.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => `<strong>${a ?? b}</strong>`)
-    .replace(/~~(.+?)~~/g, '<s>$1</s>').replace(/==(.+?)==/g, '<mark>$1</mark>')
-    .replace(/\^([^\^\n]+)\^/g, '<sup>$1</sup>').replace(/(?<!~)~([^~\n]+)~(?!~)/g, '<sub>$1</sub>')
-    .replace(/\$([^$\n]+)\$/g, '<span class="math">$1</span>')
-    .replace(/\*([^*\n]+)\*|_([^_\n]+)_/g, (_, a, b) => `<em>${a ?? b}</em>`);
-  return value.replace(/\u0000(\d+)\u0000/g, (_, i) => tokens[Number(i)]);
+  return markdownParser.renderInline(String(text)).replace(/\$([^$\n]+)\$/g, '<span class="math">$1</span>');
 }
 
 const divider = s => /^(?:[-*_]\s*){3,}$/.test(s) || /^(?:—|–|―|─|━){3,}$/.test(s);
 const listMatch = s => s.match(/^\s*(?:[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+)(.*)$/);
 const orderedMatch = s => s.match(/^\s*(?:\d+[.)、．]|[（(]\d+[）)]|[０-９]+[.、．]|[①-⑳])\s*(.*)$/);
+const orderedInfo = s => {
+  const match = s.match(/^\s*((?:\d+[.)、．]|[（(]\d+[）)]|[０-９]+[.、．]|[①-⑳])\s*)(.*)$/);
+  return match ? {number:match[1].trim(),content:match[2].trim()} : null;
+};
 const tableCells = s => s.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(x => x.trim().replace(/\\\|/g, '|'));
 const isTableRule = s => s.includes('|') && tableCells(s).length > 0 && tableCells(s).every(x => /^:?-{3,}:?$/.test(x));
+const sectionKind = text => {
+  if (/参考答案|答案解析|答案与解析|标准答案/.test(text)) return 'answers';
+  if (/选择题|单选题|多选题/.test(text)) return 'choice';
+  if (/判断题|正误题/.test(text)) return 'judgment';
+  if (/填空题|补全题/.test(text)) return 'fill';
+  if (/简答题|问答题|名词解释/.test(text)) return 'short';
+  if (/代码.{0,4}题|编程题|程序设计|上机题/.test(text)) return 'code';
+  if (/计算题|求解题/.test(text)) return 'calculation';
+  if (/综合题|阅读理解|材料分析/.test(text)) return 'comprehensive';
+  return '';
+};
+const choiceLine = s => {
+  const match=s.match(/^\s*(?:([A-H])[.．、)]|[（(]([A-H])[）)])\s*(.*)$/);
+  return match?{label:match[1]||match[2],content:match[3]}:null;
+};
+const isQuestionTitle = text => text.length <= 36 && !/[。！？!?；;]$/.test(text) && /试卷|小测|测验|练习|考试|习题|题库|复习|作业|报告|总结|笔记|教程/.test(text);
 function choiceParts(text) {
-  const matches = [...text.matchAll(/(?:^|[\s　])([A-F])[.．、)]\s*/g)];
+  const matches = [...text.matchAll(/(?:^|[\s　])([A-H])[.．、)]\s*/g)];
   if (matches.length < 2) return null;
   const labels = matches.map(match => match[1]);
   if (labels.some((label, index) => index && label.charCodeAt(0) !== labels[index - 1].charCodeAt(0) + 1)) return null;
@@ -40,7 +49,7 @@ const startsBlock = s => /^(?:```|~~~|\$\$|\\\[|#{1,6}\s|>\s?|[-+*•·●○▪
 
 export function parse(text) {
   const doc = emptyDocument(), lines = String(text).replace(/\r/g, '').split('\n');
-  let i = 0;
+  let i = 0, activeQuestionKind = '', inAnswerSection = false;
   while (i < lines.length) {
     const raw = lines[i], t = raw.trim();
     if (!t) { i++; continue; }
@@ -55,13 +64,22 @@ export function parse(text) {
       while (i < lines.length && lines[i].trim() !== end) math.push(lines[i++]); if (i < lines.length) i++;
       doc.blocks.push({type:'mathBlock', content:math.join('\n')}); continue;
     }
-    if ((m = t.match(/^(#{1,6})\s+(.+?)\s*#*$/))) { doc.blocks.push({type:'heading', level:Math.min(m[1].length,3), content:m[2]}); i++; continue; }
+    if ((m = t.match(/^(#{1,6})\s+(.+?)\s*#*$/))) {
+      const content=m[2], kind=sectionKind(content);
+      if (!doc.blocks.length && m[1].length===1) doc.blocks.push({type:'title',content});
+      else doc.blocks.push({type:'heading',level:Math.min(m[1].length,3),content,category:kind||undefined});
+      activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;
+    }
     if (i + 1 < lines.length && /^\s*(?:=+|-{3,})\s*$/.test(lines[i+1]) && t.length) {
-      doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t}); i += 2; continue;
+      const kind=sectionKind(t);doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i += 2; continue;
+    }
+    if ((m=t.match(/^(?:参考答案|答案解析|标准答案|选择题|单选题|多选题|判断题|正误题|填空题|简答题|问答题|代码题|编程题|计算题|综合题)(?:\s*（[^）]*）)?$/))) {
+      const kind=sectionKind(t);doc.blocks.push({type:'heading',level:1,content:t,category:kind||undefined});activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;
     }
     if ((m = t.match(/^(?:第[一二三四五六七八九十百零〇\d]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[（(][一二三四五六七八九十\d]+[）)]|\d+[、．])\s*(.+)$/))) {
-      doc.blocks.push({type:'heading', level:1, content:t}); i++; continue;
+      const kind=sectionKind(t);doc.blocks.push({type:'heading', level:1, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++; continue;
     }
+    if (!doc.blocks.length && isQuestionTitle(t)) { doc.blocks.push({type:'title',content:t}); i++; continue; }
     if (divider(t)) { doc.blocks.push({type:'divider'}); i++; continue; }
     if (/^>/.test(t)) { const q=[]; while (i<lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/,'')); doc.blocks.push({type:'blockquote',content:q.join('\n')}); continue; }
     if (i+1<lines.length && t.includes('|') && isTableRule(lines[i+1])) {
@@ -73,6 +91,24 @@ export function parse(text) {
       const items=[]; while(i<lines.length && listMatch(lines[i].trim())) items.push(listMatch(lines[i++].trim())[1]);
       doc.blocks.push({type:'bulletList',items}); continue;
     }
+    const numbered=orderedInfo(t);
+    if (numbered && (activeQuestionKind || choiceParts(numbered.content) || (()=>{let j=i+1;while(j<lines.length&&!lines[j].trim())j++;return j<lines.length&&choiceLine(lines[j]);})())) {
+      const kind=activeQuestionKind||'choice', choices=choiceParts(numbered.content);
+      if(inAnswerSection||kind==='answers') doc.blocks.push({type:'answerItem',number:numbered.number,content:numbered.content});
+      else doc.blocks.push({type:'question',number:numbered.number,content:choices?choices.prefix:numbered.content,kind});
+      if(choices?.items.length) doc.blocks.push({type:'choiceList',items:choices.items,kind});
+      i++;continue;
+    }
+    if (choiceLine(t)) {
+      const items=[], firstLabel=choiceLine(t).label.charCodeAt(0);let expected=firstLabel,j=i;
+      while(j<lines.length){
+        if(!lines[j].trim()){j++;continue;}
+        const option=choiceLine(lines[j]);
+        if(!option||option.label.charCodeAt(0)!==expected)break;
+        items.push(option.content.trim());expected++;j++;
+      }
+      if(items.length>=2){doc.blocks.push({type:'choiceList',items,kind:activeQuestionKind||'choice'});i=j;continue;}
+    }
     if (orderedMatch(t)) {
       const items=[]; while(i<lines.length && orderedMatch(lines[i].trim())) items.push(orderedMatch(lines[i++].trim())[1]);
       doc.blocks.push({type:'orderedList',items}); continue;
@@ -83,15 +119,22 @@ export function parse(text) {
     const content = paragraph.join('\n'), choices = choiceParts(content);
     if (choices) {
       if (choices.prefix) doc.blocks.push({type:'paragraph',content:choices.prefix});
-      doc.blocks.push({type:'choiceList',items:choices.items});
-    } else doc.blocks.push({type:'paragraph',content});
+      doc.blocks.push({type:'choiceList',items:choices.items,kind:activeQuestionKind||'choice'});
+    } else if(doc.blocks.length===1&&doc.blocks[0].type==='title') doc.blocks.push({type:'intro',content});
+    else if(/^(?:参考答案|答案|正确答案|答案解析|解析|解答)[：:]/.test(content)) doc.blocks.push({type:'answerNote',content});
+    else doc.blocks.push({type:'paragraph',content});
   }
   return doc;
 }
 
 export function toMarkdown(doc) {
   return doc.blocks.map(b=>{
+    if(b.type==='title') return '# '+b.content;
     if(b.type==='heading') return '#'.repeat(b.level)+' '+b.content;
+    if(b.type==='intro') return b.content;
+    if(b.type==='question') return `${b.number} ${b.content}`.trimEnd();
+    if(b.type==='answerItem') return `${b.number} ${b.content}`.trimEnd();
+    if(b.type==='answerNote') return b.content;
     if(b.type==='paragraph') return b.content;
     if(b.type==='bulletList') return b.items.map(x=>'- '+x).join('\n');
     if(b.type==='orderedList') return b.items.map((x,i)=>`${i+1}. ${x}`).join('\n');
@@ -106,11 +149,16 @@ export function toMarkdown(doc) {
 }
 
 export function blockHtml(b) {
-  if(b.type==='heading') return `<h${b.level}>${inline(b.content)}</h${b.level}>`;
+  if(b.type==='title') return `<h1 class="document-title">${inline(b.content)}</h1>`;
+  if(b.type==='intro') return `<p class="document-intro">${inline(b.content).replace(/\n/g,'<br>')}</p>`;
+  if(b.type==='heading') return `<h${b.level}${b.category?` class="section-heading section-${esc(b.category)}"`:''}>${inline(b.content)}</h${b.level}>`;
+  if(b.type==='question') return `<p class="question question-${esc(b.kind||'generic')}"><span class="question-number">${inline(b.number)}</span> ${inline(b.content)}</p>`;
+  if(b.type==='answerItem') return `<p class="answer-item"><span class="answer-number">${inline(b.number)}</span> ${inline(b.content)}</p>`;
+  if(b.type==='answerNote') return `<p class="answer-note">${inline(b.content)}</p>`;
   if(b.type==='paragraph') return `<p>${inline(b.content).replace(/\n/g,'<br>')}</p>`;
   if(b.type==='bulletList') return '<ul>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ul>';
   if(b.type==='orderedList') return '<ol>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
-  if(b.type==='choiceList') return '<ol class="choice-list" type="A">'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
+  if(b.type==='choiceList') return `<ol class="choice-list choice-${esc(b.kind||'choice')}" type="A">`+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
   if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
   if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
   if(b.type==='mathBlock') return `<div class="math-block">${esc(b.content)}</div>`;
