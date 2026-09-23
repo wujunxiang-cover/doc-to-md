@@ -211,9 +211,20 @@ function parse(text) {
     }
     const nextNonEmpty=lines.slice(i+1).find(line=>line.trim())||'';
     const questionContext=Boolean(activeQuestionKind||choiceLine(nextNonEmpty)||choiceParts(orderedInfo(t)?.content||''));
+    // Question numbering must be interpreted before generic heading heuristics.
+    // Otherwise stems ending with a colon ("1. 主要内容是：") get promoted to
+    // headings, and numbered questions without answer choices become plain prose.
+    const numbered=orderedInfo(t);
+    if (numbered && (activeQuestionKind || isNumberedQuestion(t) || choiceParts(numbered.content) || (()=>{let j=i+1;while(j<lines.length&&!lines[j].trim())j++;return j<lines.length&&choiceLine(lines[j]);})())) {
+      const kind=activeQuestionKind||'choice', choices=choiceParts(numbered.content);
+      if(inAnswerSection||kind==='answers') doc.blocks.push({type:'answerItem',number:numbered.number,content:numbered.content});
+      else doc.blocks.push({type:'question',number:numbered.number,content:choices?choices.prefix:numbered.content,kind});
+      if(choices?.items.length) doc.blocks.push({type:'choiceList',items:choices.items,kind});
+      i++;continue;
+    }
     const detectedHeading=detectHeading(t,{previousLine:lines[i-1]||'',nextLine:lines[i+1]||'',blankBefore:i===0||!lines[i-1]?.trim(),blankAfter:i===lines.length-1||!lines[i+1]?.trim(),previousIsHeading:['title','heading'].includes(doc.blocks.at(-1)?.type),questionSection:questionContext});
-    if(detectedHeading){const kind=sectionKind(t);doc.blocks.push({type:'heading',level:detectedHeading.level,content:t,category:kind||undefined});activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;}
-    if(t.length<=32&&/[：:]$/.test(t)&&!/^\s*(?:答案|正确答案|答案解析|参考答案|标准答案)[：:]?$/.test(t)) { doc.blocks.push({type:'heading',level:2,content:t}); i++; continue; }
+    if(detectedHeading){const kind=sectionKind(t);const level=kind&&doc.blocks.some(block=>block.type==='title')?Math.max(2,detectedHeading.level):detectedHeading.level;doc.blocks.push({type:'heading',level,content:t,category:kind||undefined});activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;}
+    if(t.length<=32&&/[：:]$/.test(t)&&!numbered&&!questionContext&&!/^\s*(?:答案|正确答案|答案解析|参考答案|标准答案)[：:]?$/.test(t)) { doc.blocks.push({type:'heading',level:2,content:t}); i++; continue; }
     if (!doc.blocks.length && isQuestionTitle(t)) { doc.blocks.push({type:'title',content:t}); i++; continue; }
     if (divider(t)) { doc.blocks.push({type:'divider'}); i++; continue; }
     if (/^>/.test(t)) { const q=[]; while (i<lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/,'')); doc.blocks.push({type:'blockquote',content:q.join('\n')}); continue; }
@@ -225,14 +236,6 @@ function parse(text) {
     if (listMatch(t)) {
       const items=[]; while(i<lines.length && listMatch(lines[i].trim())) items.push(listMatch(lines[i++].trim())[1]);
       doc.blocks.push({type:'bulletList',items}); continue;
-    }
-    const numbered=orderedInfo(t);
-    if (numbered && (activeQuestionKind || isNumberedQuestion(t) || choiceParts(numbered.content) || (()=>{let j=i+1;while(j<lines.length&&!lines[j].trim())j++;return j<lines.length&&choiceLine(lines[j]);})())) {
-      const kind=activeQuestionKind||'choice', choices=choiceParts(numbered.content);
-      if(inAnswerSection||kind==='answers') doc.blocks.push({type:'answerItem',number:numbered.number,content:numbered.content});
-      else doc.blocks.push({type:'question',number:numbered.number,content:choices?choices.prefix:numbered.content,kind});
-      if(choices?.items.length) doc.blocks.push({type:'choiceList',items:choices.items,kind});
-      i++;continue;
     }
     if (choiceLine(t)) {
       const items=[], firstLabel=choiceLine(t).label.charCodeAt(0);let expected=firstLabel,j=i;

@@ -37,6 +37,18 @@ test('keeps numbered items under a question-type section as questions',()=>{
   assert.equal(document.blocks.some(block=>block.type==='heading'&&block.content.startsWith('（1）')),false);
 });
 
+test('formats a plain exam as title, question-type sections, stems, and choices',()=>{
+  const document=parse('OpenCV 模板匹配小测\n范围：matchTemplate() 和滑动窗口\n一、选择题\n1. 模板匹配主要解决的问题是：\nA. 灰度转换\nB. 寻找相似区域\n二、判断题\n7. 每个合法位置都会得到匹配分数。（ ）\n三、结果矩阵计算题\n12. 已知原图大小为 100 × 80。');
+  const title=document.blocks.find(block=>block.type==='title');
+  const sections=document.blocks.filter(block=>block.type==='heading');
+  assert.equal(title.content,'OpenCV 模板匹配小测');
+  assert.deepEqual(sections.map(block=>block.level),[2,2,2]);
+  assert.equal(document.blocks.some(block=>block.type==='question'&&block.number==='1.'&&block.content.endsWith('是：')),true);
+  assert.deepEqual(document.blocks.find(block=>block.type==='choiceList').items,['灰度转换','寻找相似区域']);
+  assert.equal(document.blocks.some(block=>block.type==='question'&&block.number==='7.'&&block.kind==='judgment'),true);
+  assert.equal(document.blocks.some(block=>block.type==='question'&&block.number==='12.'&&block.kind==='calculation'),true);
+});
+
 test('starts decimal-numbered headings on a new block without requiring blank lines',()=>{
   const document=parse('计算机网络的目标。\n1.1 网络协议\n协议规定通信规则。');
   assert.deepEqual(document.blocks.filter(block=>block.type==='heading').map(block=>block.level),[2]);
