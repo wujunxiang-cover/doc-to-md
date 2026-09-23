@@ -7,7 +7,7 @@ if(!document.querySelector('link[rel="icon"]')){const icon=document.createElemen
 const content = $('#content'), preview = $('#preview'), stage = $('#page-stage');
 const status = $('#status'), count = $('#count'), toast = $('#toast'), previewPane = $('#preview-pane');
 let doc={blocks:[]}, settings=clone(defaults), sourceDirty=false;
-let history=[], future=[], fileName='untitled';
+let history=[], future=[], fileName='untitled', typographyMigrated=false;
 let selectedDirectory=null;
 const exportDialog=$('#export-dialog'), exportName=$('#export-name'), exportFormat=$('#export-format');
 const settingsAction=document.createElement('button');settingsAction.id='preview-settings';settingsAction.className='close-preview';settingsAction.textContent='样式与页面';$('.preview-controls').prepend(settingsAction);
@@ -19,6 +19,7 @@ window.addEventListener('error',event=>{if(event.message)setStatus(`页面脚本
 window.addEventListener('unhandledrejection',event=>{const reason=event.reason?.message||'未知错误';setStatus(`操作未完成：${reason}`)});
 function push(){history.push(preview.innerHTML);if(history.length>40)history.shift();future=[]}
 function applySettings(){
+  if(!typographyMigrated){const oldDefaults={body:16,h1:32,h2:24,h3:19,code:13};for(const [key,size] of Object.entries(oldDefaults))if(settings.sizes[key]===size)settings.sizes[key]=defaults.sizes[key];typographyMigrated=true;}
   const root=document.documentElement.style;
   root.setProperty('--body-font',`"${settings.fonts.body}","PingFang SC",sans-serif`);
   root.setProperty('--heading-font',`"${settings.fonts.heading}","PingFang SC",sans-serif`);
@@ -78,6 +79,7 @@ function serializePreview(){
     if(tag==='p')return text;
     if(tag==='blockquote')return text.split('\n').map(line=>`> ${line}`).join('\n');
     if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>{const body=[...item.childNodes].filter(child=>!(child.nodeType===Node.ELEMENT_NODE&&child.classList.contains('list-marker'))).map(inlineMarkdown).join('').trim();return `${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${body}`}).join('\n');
+    if(node.classList.contains('flow-diagram'))return [...node.querySelectorAll('.flow-step')].map(step=>step.textContent.trim()).join(' → ');
     if(tag==='pre')return `\`\`\`${node.dataset.language||''}\n${node.textContent}\n\`\`\``;
     if(tag==='hr')return '---';
     if(tag==='table'){
@@ -116,6 +118,7 @@ function panel(kind){
   box.querySelectorAll('[data-theme]').forEach(button=>button.onclick=()=>{
     settings.theme=button.dataset.theme;
     const presets={academic:{body:'SimSun',heading:'SimHei',sizes:{body:15,h1:30,h2:23,h3:18},lineHeight:1.75,spacing:16},study:{body:'Microsoft YaHei',heading:'Microsoft YaHei',sizes:{body:16,h1:30,h2:23,h3:18},lineHeight:1.65,spacing:12},official:{body:'SimSun',heading:'SimHei',sizes:{body:16,h1:30,h2:24,h3:18},lineHeight:1.7,spacing:14},modern:{body:'PingFang SC',heading:'PingFang SC',sizes:{body:16,h1:32,h2:24,h3:19},lineHeight:1.75,spacing:18},report:{body:'Microsoft YaHei',heading:'SimHei',sizes:{body:16,h1:30,h2:23,h3:18},lineHeight:1.7,spacing:16},business:{body:'Microsoft YaHei',heading:'Microsoft YaHei',sizes:{body:16,h1:30,h2:23,h3:18},lineHeight:1.65,spacing:14},clean:{body:'Microsoft YaHei',heading:'Microsoft YaHei',sizes:{body:16,h1:32,h2:24,h3:19},lineHeight:1.7,spacing:16},notion:{body:'Microsoft YaHei',heading:'Microsoft YaHei',sizes:{body:16,h1:32,h2:24,h3:19},lineHeight:1.8,spacing:18},github:{body:'Microsoft YaHei',heading:'Microsoft YaHei',sizes:{body:16,h1:30,h2:23,h3:18},lineHeight:1.7,spacing:16}}[settings.theme];
+    Object.assign(presets.sizes,{body:15,h1:29,h2:22,h3:18});
     settings.fonts.body=presets.body;settings.fonts.heading=presets.heading;Object.assign(settings.sizes,presets.sizes);settings.paragraph.lineHeight=presets.lineHeight;settings.paragraph.spacing=presets.spacing;applySettings();panel('style');
   });
   box.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{const fonts={office:['Microsoft YaHei','Arial','Consolas'],paper:['SimSun','Times New Roman','Courier New'],report:['SimHei','Calibri','Consolas'],reading:['PingFang SC','Georgia','Menlo']}[b.dataset.preset];[settings.fonts.body,settings.fonts.latin,settings.fonts.code]=fonts;settings.fonts.heading=fonts[0];applySettings();panel('style')});

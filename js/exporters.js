@@ -79,7 +79,7 @@ function mathSource(tex){
   source=source.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g,'$1⁄$2').replace(/\\sqrt\{([^{}]+)\}/g,'√$1');
   return source.replace(/\\([A-Za-z]+)/g,(_match,name)=>greek[name]||symbols[name]||name);
 }
-function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.max(settings.sizes.body||16,17))){
+function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.max(settings.sizes.body||15,15))){
   const font=fontOptions(settings),normal={font,language:{value:'en-US',eastAsia:'zh-CN'},size:bodySize,color:palette.ink,characterSpacing:Math.round((settings.paragraph.letterSpacing||0)*15),...base};
   const tokens=/!\[[^\]]*\]\([^)]+\)|\\\([\s\S]+?\\\)|\$(?!\$)[^$\n]+\$|`[^`\n]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|~~[\s\S]+?~~|==[\s\S]+?==|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_)|\^[^^\n]+\^|(?<!~)~[^~\n]+~(?!~)|\[[^\]]+\]\([^)]+\)/g;
   const result=[];
@@ -136,7 +136,7 @@ function pageDimensions(settings){
   return {page:settings.page.orientation==='landscape'?{width:portrait.height,height:portrait.width}:portrait,margin:marginTwips};
 }
 function blockParagraphs(block,D,settings,palette){
-  const bodySize=Math.max(settings.sizes.body||16,17),spacing=Math.round((settings.paragraph.spacing||16)*11.25),line=lineTwips(bodySize,Math.max(1.55,settings.paragraph.lineHeight||1.7)),font=fontOptions(settings);
+  const bodySize=Math.max(settings.sizes.body||15,15),spacing=Math.round((settings.paragraph.spacing||12)*11.25),line=lineTwips(bodySize,Math.max(1.5,settings.paragraph.lineHeight||1.65)),font=fontOptions(settings);
   const text=block.content||'';
   if(block.type==='title'){const style=settings.headings.h1;return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel.HEADING_1,alignment:D.AlignmentType[style.align.toUpperCase()],keepNext:true,spacing:{before:0,after:Math.round(spacing*1.2),line:lineTwips(bodySize+12,1.25)},run:{bold:style.bold,color:palette.ink,size:pxToHalfPoints((settings.sizes.h1||32)+8),font:{...font,eastAsia:style.font||settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})]}
   if(block.type==='heading'){
@@ -156,8 +156,9 @@ function blockParagraphs(block,D,settings,palette){
   if(block.type==='orderedList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${formatListNumber(index,settings.list.numbering,block.numbers?.[index])} `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
   if(block.type==='choiceList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${String.fromCharCode(65+index)}. `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
   if(block.type==='blockquote')return block.content.split('\n').map(lineText=>paragraph(D,lineText,settings,palette,{indent:{left:360,right:180},border:{left:{color:palette.accent,space:8,style:'single',size:16}},shading:{fill:palette.pale},spacing:{before:45,after:110,line},keepLines:true}));
+  if(block.type==='flowDiagram')return [paragraph(D,block.steps.map((step,index)=>`${index?'   →   ':''}${step}`).join(''),settings,palette,{alignment:D.AlignmentType.CENTER,shading:{fill:palette.pale},spacing:{before:120,after:160,line:lineTwips(bodySize+2,1.5)},keepLines:true,run:{bold:true,color:palette.ink}})];
   if(block.type==='codeBlock'){
-    const codeFont=settings.fonts.code||'Consolas',codeRuns=block.content.split('\n').map((lineText,index)=>new D.TextRun({text:lineText||' ',...(index?{break:1}:{}),font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||13,13)),color:'F0F3F8'}));
+    const codeFont=settings.fonts.code||'Consolas',codeRuns=block.content.split('\n').map((lineText,index)=>new D.TextRun({text:lineText||' ',...(index?{break:1}:{}),font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||12,12)),color:'F0F3F8'}));
     return [new D.Paragraph({style:'CodeBlock',children:codeRuns,shading:{fill:palette.code},indent:{left:190,right:190},spacing:{before:140,after:190,line:300},keepLines:true})];
   }
   if(block.type==='mathBlock')return [new D.Paragraph({children:makeRuns(text,D,settings,palette,{font:{ascii:'Cambria Math',hAnsi:'Cambria Math',eastAsia:settings.fonts.body||'Microsoft YaHei'}}),alignment:D.AlignmentType.CENTER,spacing:{before:120,after:150,line},shading:{fill:palette.pale}})];
@@ -175,11 +176,11 @@ function buildDocx(doc,settings,D){
     }
     children.push(...blockParagraphs(block,D,settings,palette));
   }
-  const font=fontOptions(settings),bodySize=pxToHalfPoints(Math.max(settings.sizes.body||16,17)),{page,margin}=pageDimensions(settings),codeFont=settings.fonts.code||'Consolas';
+  const font=fontOptions(settings),bodySize=pxToHalfPoints(Math.max(settings.sizes.body||15,15)),{page,margin}=pageDimensions(settings),codeFont=settings.fonts.code||'Consolas';
   return new D.Document({
     styles:{
       default:{document:{run:{font,language:{value:'en-US',eastAsia:'zh-CN'},size:bodySize,color:palette.ink},paragraph:{spacing:{after:180,line:420}}}},
-      paragraphStyles:[{id:'CodeBlock',name:'Code Block',basedOn:'Normal',next:'Normal',paragraph:{shading:{fill:palette.code},indent:{left:190,right:190},spacing:{before:140,after:190,line:300},keepLines:true},run:{font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||13,13)),color:'F0F3F8'}}]
+      paragraphStyles:[{id:'CodeBlock',name:'Code Block',basedOn:'Normal',next:'Normal',paragraph:{shading:{fill:palette.code},indent:{left:190,right:190},spacing:{before:140,after:190,line:300},keepLines:true},run:{font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||12,12)),color:'F0F3F8'}}]
     },
     sections:[{properties:{page:{size:page,margin:{top:margin,right:margin,bottom:margin,left:margin}}},children}],
     numbering:{config:[{reference:'unordered',levels:[{level:0,format:'bullet',text:'•',alignment:'left',style:{paragraph:{indent:{left:440,hanging:220}},run:{font:'Arial'}}}]}]}

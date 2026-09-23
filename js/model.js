@@ -1,12 +1,12 @@
 export const defaults = {
   theme:'clean', pageMode:'continuous',
   fonts:{body:'Microsoft YaHei',heading:'Microsoft YaHei',latin:'Arial',code:'Menlo'},
-  sizes:{body:16,h1:32,h2:24,h3:19,code:13},
-  paragraph:{lineHeight:1.7,spacing:16,before:0,firstLineIndent:0,letterSpacing:0},
+  sizes:{body:15,h1:29,h2:22,h3:18,code:12},
+  paragraph:{lineHeight:1.65,spacing:12,before:0,firstLineIndent:0,letterSpacing:0},
   headings:{
-    h1:{font:'',bold:true,align:'left',before:28,after:14},
-    h2:{font:'',bold:true,align:'left',before:22,after:11},
-    h3:{font:'',bold:true,align:'left',before:17,after:9}
+    h1:{font:'',bold:true,align:'left',before:24,after:12},
+    h2:{font:'',bold:true,align:'left',before:18,after:9},
+    h3:{font:'',bold:true,align:'left',before:14,after:7}
   },
   list:{indent:28,spacing:6,numbering:'source'},
   page:{size:'A4',orientation:'portrait',margin:'normal'}

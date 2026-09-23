@@ -10,7 +10,7 @@ class MarkdownStub {
   renderInline(text){return String(text)}
 }
 globalThis.window={markdownit:MarkdownStub,markdownitMark(){},markdownitSub(){},markdownitSup(){}};
-const {parse}=await import('../js/parser.js');
+const {parse,toMarkdown,blockHtml}=await import('../js/parser.js');
 
 test('parses a mixed study document into semantic heading levels',()=>{
   const document=parse('第一章 计算机网络\n\n1. 网络是什么\n\n计算机网络由多个设备组成。\n\n1.1 网络协议\n\n协议规定通信规则。\n\n1.1.1 可靠传输机制\n\n（1）滑动窗口');
@@ -47,6 +47,38 @@ test('formats a plain exam as title, question-type sections, stems, and choices'
   assert.deepEqual(document.blocks.find(block=>block.type==='choiceList').items,['灰度转换','寻找相似区域']);
   assert.equal(document.blocks.some(block=>block.type==='question'&&block.number==='7.'&&block.kind==='judgment'),true);
   assert.equal(document.blocks.some(block=>block.type==='question'&&block.number==='12.'&&block.kind==='calculation'),true);
+});
+
+test('recognizes procedure lists, code examples, and arrow workflows',()=>{
+  const document=parse('操作步骤\n第一步：打开终端\n第二步：运行 npm install\nJavaScript 代码示例\nconst total = 2;\nconsole.log(total);\n数据流程\n用户输入 → 校验内容 → 生成文档 → 下载文件');
+  const list=document.blocks.find(block=>block.type==='orderedList');
+  const code=document.blocks.find(block=>block.type==='codeBlock');
+  const flow=document.blocks.find(block=>block.type==='flowDiagram');
+  assert.deepEqual(list.numbers,['第一步：','第二步：']);
+  assert.deepEqual(list.items,['打开终端','运行 npm install']);
+  assert.equal(code.language,'javascript');
+  assert.equal(code.content,'const total = 2;\nconsole.log(total);');
+  assert.deepEqual(flow.steps,['用户输入','校验内容','生成文档','下载文件']);
+  assert.match(toMarkdown(document),/```javascript\nconst total = 2;/);
+  assert.match(toMarkdown(document),/用户输入 → 校验内容 → 生成文档 → 下载文件/);
+  assert.match(blockHtml(flow),/class="flow-diagram"/);
+});
+
+test('cleans redundant whitespace and joins accidental wrapped paragraph lines',()=>{
+  const document=parse('  这是  一 段\n被复制后 断开的 文字 ，应该整理。\n\n\n下一段。  ');
+  assert.equal(document.blocks[0].content,'这是一段被复制后断开的文字，应该整理。');
+  assert.equal(document.blocks[1].content,'下一段。');
+  assert.equal(parse('保留代码：`a  b`').blocks[0].content,'保留代码：`a  b`');
+});
+
+test('turns copied tab-separated rows into a semantic table',()=>{
+  const document=parse('参数\t说明\n宽度\t100 px\n高度\t80 px');
+  assert.deepEqual(document.blocks[0],{type:'table',header:['参数','说明'],rows:[['宽度','100 px'],['高度','80 px']]});
+});
+
+test('marks recognizable API calls and constants as inline code',()=>{
+  const document=parse('调用 matchTemplate()，再用 minMaxLoc(result) 找最佳位置；方法为 TM_CCOEFF_NORMED。');
+  assert.equal(document.blocks[0].content,'调用 `matchTemplate()`，再用 `minMaxLoc(result)` 找最佳位置；方法为 `TM_CCOEFF_NORMED`。');
 });
 
 test('starts decimal-numbered headings on a new block without requiring blank lines',()=>{

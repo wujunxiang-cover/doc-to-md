@@ -108,3 +108,7 @@ button:disabled{opacity:.56;cursor:wait;transform:none}
 .document .explicit-list li{margin-block:var(--list-item-space)}
 #settings-panel input[type=checkbox]{width:auto;min-height:auto;accent-color:var(--blue)}
 #custom-style-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+:root{--body-size:15px;--h1-size:29px;--h2-size:22px;--h3-size:18px;--code-size:12px;--line-height:1.65;--paragraph-space:12px}
+.document .flow-diagram{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:9px;margin:0 0 var(--paragraph-space);padding:15px 16px;border:1px solid #dfe6ef;border-radius:10px;background:linear-gradient(135deg,#f8faff,#f3f7fb);text-align:center}
+.document .flow-step{display:inline-flex;align-items:center;min-height:34px;padding:6px 12px;border:1px solid #d8e1ed;border-radius:8px;background:#fff;color:#2d3b52;font-weight:650}
+.document .flow-arrow{color:var(--blue);font-size:18px;font-weight:750}
