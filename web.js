@@ -10,6 +10,8 @@ let history=[], future=[], fileName='untitled';
 const save=()=>localStorage.setItem('text-to-md-v2',JSON.stringify({text:content.value,doc,settings,fileName,dirty,sourceDirty}));
 function notify(message){toast.textContent=message;toast.hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>toast.hidden=true,2600)}
 function setStatus(message){status.textContent=message}
+window.addEventListener('error',event=>{if(event.message)setStatus(`页面脚本错误：${event.message}`)});
+window.addEventListener('unhandledrejection',event=>{const reason=event.reason?.message||'未知错误';setStatus(`操作未完成：${reason}`)});
 function push(){history.push(preview.innerHTML);if(history.length>40)history.shift();future=[]}
 function applySettings(){
   const root=document.documentElement.style;
