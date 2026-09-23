@@ -19,7 +19,6 @@ html,body{min-height:100%;background:radial-gradient(ellipse at 12% 35%,#e9e9fc 
 .editor-pane textarea{font:16px/1.95 var(--body-font);padding:34px 40px;color:#35405a;background:transparent}
 .editor-pane textarea::placeholder{color:#a1a8b8}
 .editor-actions{min-height:60px;padding:10px 22px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #eceef4;background:#fff}
-.editor-action-buttons{display:flex;gap:8px}
 .editor-actions span{font-size:12px;color:var(--muted)}
 .secondary{border-color:#dedcf5;background:#f8f7ff;color:#5149bd}
 .primary{border-color:#655de0;background:#655de0;color:#fff}

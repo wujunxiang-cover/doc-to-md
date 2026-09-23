@@ -31,7 +31,7 @@ async function enhancePreview(){
   const math=[...preview.querySelectorAll('.math-block')];
   if(math.length)try{if(!window.katex){const css=document.createElement('link');css.rel='stylesheet';css.href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';document.head.append(css);await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)})}math.forEach(n=>window.katex.render(n.textContent,n,{throwOnError:false,displayMode:true}))}catch{notify('公式暂时以原始文本显示。')}
   const codes=[...preview.querySelectorAll('pre code')];
-  if(codes.length)try{if(!window.hljs)await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/lib/common.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)});codes.forEach(n=>window.hljs.highlightElement(n))}catch{}
+  if(codes.length)try{if(!window.hljs)await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/build/highlight.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)});codes.forEach(n=>window.hljs.highlightElement(n))}catch{}
 }
 function format(){
   doc=parse(content.value);content.value=toMarkdown(doc).trimEnd();doc=parse(content.value);updateCount();render();enhancePreview();setStatus('已按本地规则自动排版；输入框已更新为整理后的 Markdown');notify('排版完成，输入框已更新，可继续编辑或删除');return true;
@@ -61,7 +61,7 @@ function serializePreview(){
     if(/^h[1-6]$/.test(tag))return `${'#'.repeat(Number(tag[1]))} ${text}`;
     if(tag==='p')return text;
     if(tag==='blockquote')return text.split('\n').map(line=>`> ${line}`).join('\n');
-    if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>`${tag==='ul'?'-':`${index+1}.`} ${[...item.childNodes].map(inlineMarkdown).join('').trim()}`).join('\n');
+    if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>`${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${[...item.childNodes].map(inlineMarkdown).join('').trim()}`).join('\n');
     if(tag==='pre')return `\`\`\`${node.dataset.language||''}\n${node.textContent}\n\`\`\``;
     if(tag==='hr')return '---';
     if(tag==='table'){
@@ -92,7 +92,7 @@ function panel(kind){
   box.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{const fonts={office:['Microsoft YaHei','Arial','Consolas'],paper:['SimSun','Times New Roman','Courier New'],report:['SimHei','Calibri','Consolas'],reading:['PingFang SC','Georgia','Menlo']}[b.dataset.preset];[settings.fonts.body,settings.fonts.latin,settings.fonts.code]=fonts;settings.fonts.heading=fonts[0];applySettings();panel('style')});
 }
 
-$('#auto-format').onclick=()=>format();$('#open-preview').onclick=openPreview;$('#editor-preview').onclick=openPreview;$('#close-preview').onclick=closePreview;
+$('#auto-format').onclick=()=>format();$('#open-preview').onclick=openPreview;$('#close-preview').onclick=closePreview;
 $('#template-button').onclick=()=>panel('template');$('#style-button').onclick=()=>panel('style');$('#page-button').onclick=()=>panel('page');$('#close-panel').onclick=()=>$('#settings-panel').hidden=true;
 $('#export-menu').onclick=()=>$('#export-popover').hidden=!$('#export-popover').hidden;
 document.querySelectorAll('[data-export]').forEach(button=>button.onclick=async()=>{try{if(sourceDirty)format();const kind=button.dataset.export;setStatus('正在准备导出…');if(kind==='md')out.markdown(doc,fileName);if(kind==='docx')await out.docx(doc,settings,fileName);if(kind==='pdf')out.pdf();if(kind==='png')await out.png(preview,fileName);setStatus('导出已准备完成');$('#export-popover').hidden=true}catch(error){console.error(error);notify('导出失败，请重试。');setStatus('导出失败')}});
