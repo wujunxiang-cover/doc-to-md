@@ -1,28 +1,28 @@
-/* Focused editor with a botanical, editorial palette. */
-:root{--ink:#203332;--muted:#71827e;--line:#e1e7de;--canvas:#f1f4ed;--blue:#207a70;--accent:#e4f1ec;--body-font:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;--heading-font:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif}
-html,body{min-height:100%;background:radial-gradient(ellipse at 12% 35%,#e2ebe0 0,transparent 34%),radial-gradient(ellipse at 90% 85%,#f2e8d8 0,transparent 33%),#f5f3ec}
-.app-header{background:#203332;color:#f8f5ec;border-bottom:0;box-shadow:0 8px 24px #142b2718}
-.brand{color:#f8f5ec}.brand-icon{background:linear-gradient(145deg,#deaa72,#d88959);color:#203332}.brand small{background:#ffffff18;color:#e7c8a1;letter-spacing:.12em}
-.privacy{color:#bfcec5}.privacy i{background:#9fc985}
+/* Clean studio palette: white, soft violet and cool blue. */
+:root{--ink:#253047;--muted:#778197;--line:#e3e7f0;--canvas:#f5f6fb;--blue:#655de0;--accent:#efeeff;--body-font:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif;--heading-font:"Avenir Next","PingFang SC","Microsoft YaHei",sans-serif}
+html,body{min-height:100%;background:radial-gradient(ellipse at 12% 35%,#e9e9fc 0,transparent 34%),radial-gradient(ellipse at 90% 85%,#e3f0fa 0,transparent 33%),#f6f7fb}
+.app-header{background:#fff;color:#253047;border-bottom:1px solid #e7e9f1;box-shadow:0 5px 20px #293c6110}
+.brand{color:#253047}.brand-icon{background:linear-gradient(145deg,#8178ef,#655de0);color:#fff}.brand small{background:#f0efff;color:#655de0;letter-spacing:.12em}
+.privacy{color:#748098}.privacy i{background:#70b990}
 .app-header button{transition:transform .16s ease,background .16s ease,box-shadow .16s ease}
-.app-header #auto-format{background:#dfaa72;border-color:#dfaa72;color:#203332;font-weight:750}
-.app-header #open-preview{background:#ffffff0d;border-color:#70837d;color:#f8f5ec}
-.app-header .export-trigger{background:transparent;border-color:#ffffff32;color:#f8f5ec}
-.workspace-bar{background:#faf9f4;border-color:#e5e8df}
-.workspace{position:relative;isolation:isolate;height:calc(100vh - 140px);min-height:420px;display:flex;justify-content:center;padding:20px 18px;background:linear-gradient(120deg,#edf2e9,#f7f2e9 56%,#f0ede6)}
+.app-header #auto-format{background:#655de0;border-color:#655de0;color:#fff;font-weight:750}
+.app-header #open-preview{background:#f8f7ff;border-color:#dedcf8;color:#5149bd}
+.app-header .export-trigger{background:#fff;border-color:#e1e5ef;color:#39445b}
+.workspace-bar{background:#fff;border-color:#e5e8f0}
+.workspace{position:relative;isolation:isolate;height:calc(100vh - 140px);min-height:420px;display:flex;justify-content:center;padding:20px 18px;background:linear-gradient(120deg,#f0f0fc,#f7f8fc 56%,#edf5fb)}
 .workspace:before,.workspace:after{content:"";position:absolute;z-index:-1;pointer-events:none;border-radius:50%;filter:blur(1px)}
-.workspace:before{width:220px;height:220px;left:6%;top:12%;background:#dce9deaa}.workspace:after{width:260px;height:260px;right:7%;bottom:4%;background:#eedccbaa}
-.editor-pane{position:relative;z-index:1;width:min(940px,100%);height:100%;border:1px solid #e4e7dd;border-radius:18px;overflow:hidden;box-shadow:0 24px 70px #394c3a18;background:#fffefa}
-.pane-title{min-height:74px;padding:14px 22px;border-bottom:1px solid #eceee7}
-.pane-title span{font-size:17px;color:#203332;letter-spacing:.015em}.pane-title small{font-size:12px;color:#7b8b84}
-.editor-tools{display:flex;gap:8px}.import-button{border-color:#d9e3da;background:#f5f8f2;color:#435e54}
-.editor-pane textarea{font:16px/1.95 var(--body-font);padding:34px 40px;color:#2f4440;background:transparent}
-.editor-pane textarea::placeholder{color:#a0aaa0}
-.editor-actions{min-height:60px;padding:10px 22px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #eceee7;background:#fffefa}
+.workspace:before{width:220px;height:220px;left:6%;top:12%;background:#e3e1fbaa}.workspace:after{width:260px;height:260px;right:7%;bottom:4%;background:#deedf8aa}
+.editor-pane{position:relative;z-index:1;width:min(940px,100%);height:100%;border:1px solid #e4e7f0;border-radius:18px;overflow:hidden;box-shadow:0 24px 70px #35436014;background:#fff}
+.pane-title{min-height:74px;padding:14px 22px;border-bottom:1px solid #eceef4}
+.pane-title span{font-size:17px;color:#253047;letter-spacing:.015em}.pane-title small{font-size:12px;color:#7b8498}
+.editor-tools{display:flex;gap:8px}.import-button{border-color:#e1e3f0;background:#f8f8fd;color:#535e79}
+.editor-pane textarea{font:16px/1.95 var(--body-font);padding:34px 40px;color:#35405a;background:transparent}
+.editor-pane textarea::placeholder{color:#a1a8b8}
+.editor-actions{min-height:60px;padding:10px 22px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #eceef4;background:#fff}
 .editor-action-buttons{display:flex;gap:8px}
 .editor-actions span{font-size:12px;color:var(--muted)}
-.secondary{border-color:#d6e3d9;background:#f2f7f2;color:#356157}
-.primary{border-color:#207a70;background:#207a70;color:#fff}
+.secondary{border-color:#dedcf5;background:#f8f7ff;color:#5149bd}
+.primary{border-color:#655de0;background:#655de0;color:#fff}
 button,.import-button{transition:transform .16s ease,background .16s ease,border-color .16s ease,box-shadow .16s ease}
 button:hover,.import-button:hover{transform:translateY(-1px);box-shadow:0 5px 14px #18382e15}
 button:active,.import-button:active{transform:translateY(0)}
@@ -31,20 +31,21 @@ button:disabled{opacity:.56;cursor:wait;transform:none}
 .popover{z-index:25}.settings-panel{z-index:30}.toast{z-index:40}
 .preview-pane{display:none}
 .preview-pane.visible{position:fixed;inset:0;z-index:15;display:flex;flex-direction:column;background:#fff}
-.preview-topbar{min-height:58px;padding:8px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #e3e8df;background:#faf9f4}
+.preview-topbar{min-height:58px;padding:8px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid #e3e7f0;background:#fff}
 .preview-topbar>div:first-child{display:flex;align-items:baseline;gap:10px}
 .preview-topbar strong{font-size:15px}.preview-topbar span{font-size:12px;color:var(--muted)}
-.preview-controls{display:flex;align-items:center;gap:12px}.close-preview{border-color:var(--blue);color:var(--blue);background:#f5f7ff}
+.preview-controls{display:flex;align-items:center;gap:12px}.close-preview{border-color:#dedcf5;color:#5149bd;background:#f8f7ff}
 .format-toolbar{min-height:43px;flex-wrap:nowrap}
-.page-stage{min-height:0}.page-stage.continuous{padding:22px 8%;background:#edf1e9}
-.document{border-radius:4px;box-shadow:0 12px 36px #34463714}.document h1,.document h2,.document h3{color:#264b43}.document h1{letter-spacing:-.025em}.document mark{background:#f5d8a8;padding:0 .12em}.document img{max-width:100%;height:auto}
+.page-stage{min-height:0}.page-stage.continuous{padding:22px 8%;background:#f0f1f8}
+.document{border-radius:4px;box-shadow:0 12px 36px #35436012}.document h1,.document h2,.document h3{color:#313b5a}.document h1{letter-spacing:-.025em}.document mark{background:#fff0b8;padding:0 .12em}.document img{max-width:100%;height:auto}
 .document a{color:var(--blue);text-decoration:underline}
 .document .math{font-family:Georgia,serif;font-style:italic}
 .preview-open{overflow:hidden}
 @media(max-width:760px){
   .app-header{height:58px;padding:0 10px}.brand{font-size:16px}.privacy{display:none}
   .header-actions{gap:5px}.header-actions>button{font-size:12px;padding:7px 8px}
-  .workspace-bar{display:none}.workspace{height:calc(100dvh - 85px);min-height:0;padding:12px}
+  .workspace-bar{display:flex;height:42px;padding:0 7px;gap:2px;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:thin}.workspace-bar .tool-button,.workspace-bar .quiet-button{flex:0 0 auto;padding:6px 8px;font-size:12px}.workspace-bar .bar-spacer{display:none}
+  .workspace{height:calc(100dvh - 127px);min-height:0;padding:12px}
   .editor-pane{border-radius:10px}.pane-title{padding:10px 12px}.pane-title small{max-width:52vw;line-height:1.4}
   .editor-pane textarea{padding:17px;font-size:14px}.editor-actions{align-items:flex-start}.editor-actions span{max-width:55%;line-height:1.5}
   .preview-topbar{padding:8px 10px;min-height:56px}.preview-topbar>div:first-child{display:block}.preview-topbar span{display:block;margin-top:2px}

@@ -1,7 +1,118 @@
-import {defaults, themes, clone} from './js/model.js';
-import {parse, blockHtml, toMarkdown} from './js/parser.js';
-import * as out from './js/exporters.js';
+(()=>{
+const defaults = { theme:'clean', pageMode:'continuous', fonts:{body:'Microsoft YaHei',heading:'Microsoft YaHei',latin:'Arial',code:'Menlo'}, sizes:{body:16,h1:32,h2:24,h3:19,code:13}, paragraph:{lineHeight:1.7,spacing:16}, page:{size:'A4',orientation:'portrait',margin:'normal'} };
+const themes={clean:'简洁文档',business:'商务报告',academic:'学术文档',notion:'Notion 风格',github:'GitHub 风格'};
+function emptyDocument(){return {blocks:[]};}
+function clone(value){return JSON.parse(JSON.stringify(value));}
 
+const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl = value => /^(https?:|mailto:|\/|#)/i.test(value.trim()) ? value.trim() : '#';
+
+function inline(text) {
+  const tokens = [];
+  const hold = html => `\u0000${tokens.push(html) - 1}\u0000`;
+  let value = esc(text);
+  value = value.replace(/`([^`]+)`/g, (_, code) => hold(`<code>${code}</code>`));
+  value = value.replace(/!\[([^\]]*)\]\(([^\s)]+)(?:\s+"([^"]*)")?\)/g, (_, alt, url, title='') => hold(`<img src="${esc(safeUrl(url))}" alt="${alt}" title="${title}">`));
+  value = value.replace(/\[([^\]]+)\]\(([^\s)]+)(?:\s+"([^"]*)")?\)/g, (_, label, url, title='') => hold(`<a href="${esc(safeUrl(url))}" title="${title}" target="_blank" rel="noopener">${label}</a>`));
+  value = value.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, (_, lead, url) => `${lead}${hold(`<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener">${url}</a>`)}`);
+  value = value.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => `<strong>${a ?? b}</strong>`)
+    .replace(/~~(.+?)~~/g, '<s>$1</s>').replace(/==(.+?)==/g, '<mark>$1</mark>')
+    .replace(/\^([^\^\n]+)\^/g, '<sup>$1</sup>').replace(/(?<!~)~([^~\n]+)~(?!~)/g, '<sub>$1</sub>')
+    .replace(/\$([^$\n]+)\$/g, '<span class="math">$1</span>')
+    .replace(/\*([^*\n]+)\*|_([^_\n]+)_/g, (_, a, b) => `<em>${a ?? b}</em>`);
+  return value.replace(/\u0000(\d+)\u0000/g, (_, i) => tokens[Number(i)]);
+}
+
+const divider = s => /^(?:[-*_]\s*){3,}$/.test(s) || /^(?:—|–|―|─|━){3,}$/.test(s);
+const listMatch = s => s.match(/^\s*(?:[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+)(.*)$/);
+const orderedMatch = s => s.match(/^\s*(?:\d+[.)、．]|[（(]\d+[）)]|[０-９]+[.、．]|[①-⑳])\s*(.*)$/);
+const tableCells = s => s.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(x => x.trim().replace(/\\\|/g, '|'));
+const isTableRule = s => s.includes('|') && tableCells(s).length > 0 && tableCells(s).every(x => /^:?-{3,}:?$/.test(x));
+const startsBlock = s => /^(?:```|~~~|\$\$|\\\[|#{1,6}\s|>\s?|[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+|\d+[.)、．]\s+|[（(]\d+[）)]|[一二三四五六七八九十]+[、.．])/.test(s) || divider(s);
+
+function parse(text) {
+  const doc = emptyDocument(), lines = String(text).replace(/\r/g, '').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const raw = lines[i], t = raw.trim();
+    if (!t) { i++; continue; }
+    let m;
+    if (/^(?:```|~~~)/.test(t)) {
+      const fence = t.slice(0, 3), language = t.slice(3).trim(), code = [];
+      i++; while (i < lines.length && !lines[i].trim().startsWith(fence)) code.push(lines[i++]); if (i < lines.length) i++;
+      doc.blocks.push({type:'codeBlock', language, content:code.join('\n')}); continue;
+    }
+    if (t === '$$' || t === '\\[') {
+      const end = t === '$$' ? '$$' : '\\]'; let math = []; i++;
+      while (i < lines.length && lines[i].trim() !== end) math.push(lines[i++]); if (i < lines.length) i++;
+      doc.blocks.push({type:'mathBlock', content:math.join('\n')}); continue;
+    }
+    if ((m = t.match(/^(#{1,6})\s+(.+?)\s*#*$/))) { doc.blocks.push({type:'heading', level:Math.min(m[1].length,3), content:m[2]}); i++; continue; }
+    if (i + 1 < lines.length && /^\s*(?:=+|-{3,})\s*$/.test(lines[i+1]) && t.length) {
+      doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t}); i += 2; continue;
+    }
+    if ((m = t.match(/^(?:第[一二三四五六七八九十百零〇\d]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[（(][一二三四五六七八九十\d]+[）)]|\d+[、．])\s*(.+)$/))) {
+      doc.blocks.push({type:'heading', level:1, content:t}); i++; continue;
+    }
+    if (divider(t)) { doc.blocks.push({type:'divider'}); i++; continue; }
+    if (/^>/.test(t)) { const q=[]; while (i<lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/,'')); doc.blocks.push({type:'blockquote',content:q.join('\n')}); continue; }
+    if (i+1<lines.length && t.includes('|') && isTableRule(lines[i+1])) {
+      const header=tableCells(t); i+=2; const rows=[];
+      while(i<lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(tableCells(lines[i++]));
+      doc.blocks.push({type:'table',header,rows}); continue;
+    }
+    if (listMatch(t)) {
+      const items=[]; while(i<lines.length && listMatch(lines[i].trim())) items.push(listMatch(lines[i++].trim())[1]);
+      doc.blocks.push({type:'bulletList',items}); continue;
+    }
+    if (orderedMatch(t)) {
+      const items=[]; while(i<lines.length && orderedMatch(lines[i].trim())) items.push(orderedMatch(lines[i++].trim())[1]);
+      doc.blocks.push({type:'orderedList',items}); continue;
+    }
+    if (/^\s{4,}\S/.test(raw)) { const code=[]; while(i<lines.length && (/^\s{4,}\S/.test(lines[i]) || !lines[i].trim())) code.push(lines[i++].replace(/^ {4}/,'')); doc.blocks.push({type:'codeBlock',language:'',content:code.join('\n').trimEnd()}); continue; }
+    const paragraph=[t]; i++;
+    while(i<lines.length && lines[i].trim() && !startsBlock(lines[i].trim()) && !(i+1<lines.length && /^(?:=+|-{3,})$/.test(lines[i+1].trim()))) paragraph.push(lines[i++].trim());
+    doc.blocks.push({type:'paragraph',content:paragraph.join('\n')});
+  }
+  return doc;
+}
+
+function toMarkdown(doc) {
+  return doc.blocks.map(b=>{
+    if(b.type==='heading') return '#'.repeat(b.level)+' '+b.content;
+    if(b.type==='paragraph') return b.content;
+    if(b.type==='bulletList') return b.items.map(x=>'- '+x).join('\n');
+    if(b.type==='orderedList') return b.items.map((x,i)=>`${i+1}. ${x}`).join('\n');
+    if(b.type==='blockquote') return b.content.split('\n').map(x=>'> '+x).join('\n');
+    if(b.type==='codeBlock') return '```'+(b.language||'')+'\n'+b.content+'\n```';
+    if(b.type==='mathBlock') return '$$\n'+b.content+'\n$$';
+    if(b.type==='divider') return '---';
+    if(b.type==='table') return '| '+b.header.join(' | ')+' |\n| '+b.header.map(()=>'---').join(' | ')+' |\n'+b.rows.map(r=>'| '+r.join(' | ')+' |').join('\n');
+    return '';
+  }).join('\n\n')+'\n';
+}
+
+function blockHtml(b) {
+  if(b.type==='heading') return `<h${b.level}>${inline(b.content)}</h${b.level}>`;
+  if(b.type==='paragraph') return `<p>${inline(b.content).replace(/\n/g,'<br>')}</p>`;
+  if(b.type==='bulletList') return '<ul>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ul>';
+  if(b.type==='orderedList') return '<ol>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
+  if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
+  if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
+  if(b.type==='mathBlock') return `<div class="math-block">${esc(b.content)}</div>`;
+  if(b.type==='divider') return '<hr>';
+  if(b.type==='table') return '<table><thead><tr>'+b.header.map(x=>`<th>${inline(x)}</th>`).join('')+'</tr></thead><tbody>'+b.rows.map(r=>'<tr>'+b.header.map((_,i)=>`<td>${inline(r[i]||'')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
+  return '';
+}
+
+const download=(blob,name)=>{const u=URL.createObjectURL(blob),a=Object.assign(document.createElement('a'),{href:u,download:name});a.click();setTimeout(()=>URL.revokeObjectURL(u),300);};
+const load=src=>new Promise((resolve,reject)=>{if(document.querySelector(`script[src="${src}"]`))return resolve();const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(new Error('资源加载失败'));document.head.append(s);});
+function markdown(doc,name){download(new Blob([toMarkdown(doc)],{type:'text/markdown;charset=utf-8'}),`${name}.md`);}
+async function png(node,name){await load('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');const canvas=await window.html2canvas(node,{scale:2,backgroundColor:'#ffffff',useCORS:true});canvas.toBlob(b=>download(b,`${name}.png`),'image/png');}
+function pdf(){window.print();}
+async function docx(doc,settings,name){await load('https://unpkg.com/docx@8.5.0/build/index.umd.js');const D=window.docx;if(!D)throw new Error('Word 导出组件加载失败');const children=doc.blocks.flatMap(b=>{const text=b.content||'';if(b.type==='heading')return [new D.Paragraph({text,heading:`HEADING_${b.level}`})];if(b.type==='bulletList')return b.items.map(x=>new D.Paragraph({text:x,bullet:{level:0}}));if(b.type==='orderedList')return b.items.map(x=>new D.Paragraph({text:x,numbering:{reference:'main',level:0}}));if(b.type==='blockquote')return [new D.Paragraph({text,indent:{left:720},border:{left:{color:'2D5BE8',space:6,style:'single',size:12}}})];if(b.type==='codeBlock')return [new D.Paragraph({text,style:'Code'})];if(b.type==='divider')return [new D.Paragraph({text:'─'.repeat(42)})];return [new D.Paragraph({children:[new D.TextRun({text, font:settings.fonts.body,size:Math.round(settings.sizes.body*1.5)})]})];});const file=new D.Document({sections:[{properties:{page:{size:{width:11906,height:16838},margin:{top:1134,right:1134,bottom:1134,left:1134}}},children}],numbering:{config:[{reference:'main',levels:[{level:0,format:'decimal',text:'%1.',alignment:'left'}]}]}});download(await D.Packer.toBlob(file),`${name}.docx`);}
+
+const out={markdown,png,pdf,docx};
 const $ = s => document.querySelector(s);
 const content = $('#content'), preview = $('#preview'), stage = $('#page-stage');
 const status = $('#status'), count = $('#count'), toast = $('#toast'), previewPane = $('#preview-pane');
@@ -110,3 +221,5 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape'&&previewPane
 let cached=null;try{cached=localStorage.getItem('text-to-md-v2')}catch{}
 if(cached)try{const saved=JSON.parse(cached);content.value=saved.text||'';doc=saved.doc||{blocks:[]};settings={...clone(defaults),...saved.settings};settings.fonts={...defaults.fonts,...saved.settings?.fonts};settings.sizes={...defaults.sizes,...saved.settings?.sizes};settings.paragraph={...defaults.paragraph,...saved.settings?.paragraph};settings.page={...defaults.page,...saved.settings?.page};fileName=saved.fileName||'untitled';sourceDirty=Boolean(saved.sourceDirty);render();sourceDirty=Boolean(saved.sourceDirty);setStatus('已恢复本地草稿')}catch{}
 applySettings();updateCount();
+
+})();
