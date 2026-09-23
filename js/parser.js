@@ -3,9 +3,26 @@ import { emptyDocument } from './model.js';
 const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const markdownParser = new window.markdownit({html:false,linkify:true,breaks:false,typographer:false})
   .use(window.markdownitMark).use(window.markdownitSub).use(window.markdownitSup);
+markdownParser.inline.ruler.before('escape','math_inline',(state,silent)=>{
+  const source=state.src,start=state.pos;
+  let open='',close='';
+  if(source.startsWith('\\(',start)){open='\\(';close='\\)'}
+  else if(source[start]==='$'&&source[start+1]!=='$'){open='$';close='$'}
+  else return false;
+  const end=source.indexOf(close,start+open.length);
+  if(end<0||end===start+open.length)return false;
+  const content=source.slice(start+open.length,end);
+  if(!content.trim()||/^\s|\s$/.test(content))return false;
+  if(!silent){const token=state.push('math_inline','span',0);token.content=content;token.markup=open}
+  state.pos=end+close.length;return true;
+});
+markdownParser.renderer.rules.math_inline=(tokens,index)=>{
+  const formula=tokens[index].content;
+  return `<span class="math" data-tex="${esc(formula)}" contenteditable="false">${esc(formula)}</span>`;
+};
 
 export function inline(text) {
-  return markdownParser.renderInline(String(text)).replace(/\$([^$\n]+)\$/g, '<span class="math">$1</span>');
+  return markdownParser.renderInline(String(text));
 }
 
 const divider = s => /^(?:[-*_]\s*){3,}$/.test(s) || /^(?:—|–|―|─|━){3,}$/.test(s);
@@ -73,12 +90,13 @@ export function parse(text) {
     if (i + 1 < lines.length && /^\s*(?:=+|-{3,})\s*$/.test(lines[i+1]) && t.length) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i += 2; continue;
     }
-    if ((m=t.match(/^(?:参考答案|答案解析|标准答案|选择题|单选题|多选题|判断题|正误题|填空题|简答题|问答题|代码题|编程题|计算题|综合题)(?:\s*（[^）]*）)?$/))) {
+    if ((m=t.match(/^(?:参考答案|答案解析|标准答案|选择题|单选题|多选题|判断题|正误题|填空题|简答题|问答题|代码题|编程题|计算题|综合题)(?:\s*（[^）]*）)?[：:]?$/))) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading',level:1,content:t,category:kind||undefined});activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;
     }
     if ((m = t.match(/^(?:第[一二三四五六七八九十百零〇\d]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[（(][一二三四五六七八九十\d]+[）)]|\d+[、．])\s*(.+)$/))) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading', level:1, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++; continue;
     }
+    if(t.length<=32&&/[：:]$/.test(t)&&!/^\s*(?:答案|正确答案|答案解析|参考答案|标准答案)[：:]?$/.test(t)) { doc.blocks.push({type:'heading',level:2,content:t}); i++; continue; }
     if (!doc.blocks.length && isQuestionTitle(t)) { doc.blocks.push({type:'title',content:t}); i++; continue; }
     if (divider(t)) { doc.blocks.push({type:'divider'}); i++; continue; }
     if (/^>/.test(t)) { const q=[]; while (i<lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/,'')); doc.blocks.push({type:'blockquote',content:q.join('\n')}); continue; }
@@ -110,8 +128,13 @@ export function parse(text) {
       if(items.length>=2){doc.blocks.push({type:'choiceList',items,kind:activeQuestionKind||'choice'});i=j;continue;}
     }
     if (orderedMatch(t)) {
-      const items=[]; while(i<lines.length && orderedMatch(lines[i].trim())) items.push(orderedMatch(lines[i++].trim())[1]);
-      doc.blocks.push({type:'orderedList',items}); continue;
+      const items=[],numbers=[];let j=i;
+      while(j<lines.length){
+        if(!lines[j].trim()){let next=j;while(next<lines.length&&!lines[next].trim())next++;if(next>=lines.length||!orderedMatch(lines[next].trim()))break;j=next}
+        const item=orderedInfo(lines[j].trim());if(!item)break;
+        items.push(item.content);numbers.push(item.number);j++;
+      }
+      doc.blocks.push({type:'orderedList',items,numbers});i=j;continue;
     }
     if (/^\s{4,}\S/.test(raw)) { const code=[]; while(i<lines.length && (/^\s{4,}\S/.test(lines[i]) || !lines[i].trim())) code.push(lines[i++].replace(/^ {4}/,'')); doc.blocks.push({type:'codeBlock',language:'',content:code.join('\n').trimEnd()}); continue; }
     const paragraph=[t]; i++;
@@ -137,7 +160,7 @@ export function toMarkdown(doc) {
     if(b.type==='answerNote') return b.content;
     if(b.type==='paragraph') return b.content;
     if(b.type==='bulletList') return b.items.map(x=>'- '+x).join('\n');
-    if(b.type==='orderedList') return b.items.map((x,i)=>`${i+1}. ${x}`).join('\n');
+    if(b.type==='orderedList') return b.items.map((x,i)=>`${b.numbers?.[i]||`${i+1}.`} ${x}`).join('\n');
     if(b.type==='choiceList') return b.items.map((x,i)=>`${String.fromCharCode(65+i)}. ${x}`).join('\n');
     if(b.type==='blockquote') return b.content.split('\n').map(x=>'> '+x).join('\n');
     if(b.type==='codeBlock') return '```'+(b.language||'')+'\n'+b.content+'\n```';
@@ -156,12 +179,12 @@ export function blockHtml(b) {
   if(b.type==='answerItem') return `<p class="answer-item"><span class="answer-number">${inline(b.number)}</span> ${inline(b.content)}</p>`;
   if(b.type==='answerNote') return `<p class="answer-note">${inline(b.content)}</p>`;
   if(b.type==='paragraph') return `<p>${inline(b.content).replace(/\n/g,'<br>')}</p>`;
-  if(b.type==='bulletList') return '<ul>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ul>';
-  if(b.type==='orderedList') return '<ol>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
-  if(b.type==='choiceList') return `<ol class="choice-list choice-${esc(b.kind||'choice')}" type="A">`+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
+  if(b.type==='bulletList') return '<ul class="explicit-list">'+b.items.map(x=>`<li><span class="list-marker bullet-marker" contenteditable="false">•</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ul>';
+  if(b.type==='orderedList') return '<ol class="explicit-list">'+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${esc(b.numbers?.[index]||`${index+1}.`)}</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
+  if(b.type==='choiceList') return `<ol class="choice-list explicit-list choice-${esc(b.kind||'choice')}">`+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${String.fromCharCode(65+index)}.</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
   if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
   if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
-  if(b.type==='mathBlock') return `<div class="math-block">${esc(b.content)}</div>`;
+  if(b.type==='mathBlock') return `<div class="math-block" data-tex="${esc(b.content)}" contenteditable="false">${esc(b.content)}</div>`;
   if(b.type==='divider') return '<hr>';
   if(b.type==='table') return '<table><thead><tr>'+b.header.map(x=>`<th>${inline(x)}</th>`).join('')+'</tr></thead><tbody>'+b.rows.map(r=>'<tr>'+b.header.map((_,i)=>`<td>${inline(r[i]||'')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
   return '';

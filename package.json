@@ -3,6 +3,9 @@
     "build": "node build.mjs"
   },
   "dependencies": {
+    "docx": "^8.5.0",
+    "html2canvas": "^1.4.1",
+    "katex": "^0.18.0",
     "markdown-it": "15.0.2",
     "markdown-it-mark": "4.0.0",
     "markdown-it-sub": "2.0.0",

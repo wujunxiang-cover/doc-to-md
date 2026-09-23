@@ -30,9 +30,26 @@ function clone(value){return JSON.parse(JSON.stringify(value));}
 const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const markdownParser = new window.markdownit({html:false,linkify:true,breaks:false,typographer:false})
   .use(window.markdownitMark).use(window.markdownitSub).use(window.markdownitSup);
+markdownParser.inline.ruler.before('escape','math_inline',(state,silent)=>{
+  const source=state.src,start=state.pos;
+  let open='',close='';
+  if(source.startsWith('\\(',start)){open='\\(';close='\\)'}
+  else if(source[start]==='$'&&source[start+1]!=='$'){open='$';close='$'}
+  else return false;
+  const end=source.indexOf(close,start+open.length);
+  if(end<0||end===start+open.length)return false;
+  const content=source.slice(start+open.length,end);
+  if(!content.trim()||/^\s|\s$/.test(content))return false;
+  if(!silent){const token=state.push('math_inline','span',0);token.content=content;token.markup=open}
+  state.pos=end+close.length;return true;
+});
+markdownParser.renderer.rules.math_inline=(tokens,index)=>{
+  const formula=tokens[index].content;
+  return `<span class="math" data-tex="${esc(formula)}" contenteditable="false">${esc(formula)}</span>`;
+};
 
 function inline(text) {
-  return markdownParser.renderInline(String(text)).replace(/\$([^$\n]+)\$/g, '<span class="math">$1</span>');
+  return markdownParser.renderInline(String(text));
 }
 
 const divider = s => /^(?:[-*_]\s*){3,}$/.test(s) || /^(?:—|–|―|─|━){3,}$/.test(s);
@@ -100,12 +117,13 @@ function parse(text) {
     if (i + 1 < lines.length && /^\s*(?:=+|-{3,})\s*$/.test(lines[i+1]) && t.length) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i += 2; continue;
     }
-    if ((m=t.match(/^(?:参考答案|答案解析|标准答案|选择题|单选题|多选题|判断题|正误题|填空题|简答题|问答题|代码题|编程题|计算题|综合题)(?:\s*（[^）]*）)?$/))) {
+    if ((m=t.match(/^(?:参考答案|答案解析|标准答案|选择题|单选题|多选题|判断题|正误题|填空题|简答题|问答题|代码题|编程题|计算题|综合题)(?:\s*（[^）]*）)?[：:]?$/))) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading',level:1,content:t,category:kind||undefined});activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;
     }
     if ((m = t.match(/^(?:第[一二三四五六七八九十百零〇\d]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[（(][一二三四五六七八九十\d]+[）)]|\d+[、．])\s*(.+)$/))) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading', level:1, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++; continue;
     }
+    if(t.length<=32&&/[：:]$/.test(t)&&!/^\s*(?:答案|正确答案|答案解析|参考答案|标准答案)[：:]?$/.test(t)) { doc.blocks.push({type:'heading',level:2,content:t}); i++; continue; }
     if (!doc.blocks.length && isQuestionTitle(t)) { doc.blocks.push({type:'title',content:t}); i++; continue; }
     if (divider(t)) { doc.blocks.push({type:'divider'}); i++; continue; }
     if (/^>/.test(t)) { const q=[]; while (i<lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/,'')); doc.blocks.push({type:'blockquote',content:q.join('\n')}); continue; }
@@ -137,8 +155,13 @@ function parse(text) {
       if(items.length>=2){doc.blocks.push({type:'choiceList',items,kind:activeQuestionKind||'choice'});i=j;continue;}
     }
     if (orderedMatch(t)) {
-      const items=[]; while(i<lines.length && orderedMatch(lines[i].trim())) items.push(orderedMatch(lines[i++].trim())[1]);
-      doc.blocks.push({type:'orderedList',items}); continue;
+      const items=[],numbers=[];let j=i;
+      while(j<lines.length){
+        if(!lines[j].trim()){let next=j;while(next<lines.length&&!lines[next].trim())next++;if(next>=lines.length||!orderedMatch(lines[next].trim()))break;j=next}
+        const item=orderedInfo(lines[j].trim());if(!item)break;
+        items.push(item.content);numbers.push(item.number);j++;
+      }
+      doc.blocks.push({type:'orderedList',items,numbers});i=j;continue;
     }
     if (/^\s{4,}\S/.test(raw)) { const code=[]; while(i<lines.length && (/^\s{4,}\S/.test(lines[i]) || !lines[i].trim())) code.push(lines[i++].replace(/^ {4}/,'')); doc.blocks.push({type:'codeBlock',language:'',content:code.join('\n').trimEnd()}); continue; }
     const paragraph=[t]; i++;
@@ -164,7 +187,7 @@ function toMarkdown(doc) {
     if(b.type==='answerNote') return b.content;
     if(b.type==='paragraph') return b.content;
     if(b.type==='bulletList') return b.items.map(x=>'- '+x).join('\n');
-    if(b.type==='orderedList') return b.items.map((x,i)=>`${i+1}. ${x}`).join('\n');
+    if(b.type==='orderedList') return b.items.map((x,i)=>`${b.numbers?.[i]||`${i+1}.`} ${x}`).join('\n');
     if(b.type==='choiceList') return b.items.map((x,i)=>`${String.fromCharCode(65+i)}. ${x}`).join('\n');
     if(b.type==='blockquote') return b.content.split('\n').map(x=>'> '+x).join('\n');
     if(b.type==='codeBlock') return '```'+(b.language||'')+'\n'+b.content+'\n```';
@@ -183,75 +206,72 @@ function blockHtml(b) {
   if(b.type==='answerItem') return `<p class="answer-item"><span class="answer-number">${inline(b.number)}</span> ${inline(b.content)}</p>`;
   if(b.type==='answerNote') return `<p class="answer-note">${inline(b.content)}</p>`;
   if(b.type==='paragraph') return `<p>${inline(b.content).replace(/\n/g,'<br>')}</p>`;
-  if(b.type==='bulletList') return '<ul>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ul>';
-  if(b.type==='orderedList') return '<ol>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
-  if(b.type==='choiceList') return `<ol class="choice-list choice-${esc(b.kind||'choice')}" type="A">`+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
+  if(b.type==='bulletList') return '<ul class="explicit-list">'+b.items.map(x=>`<li><span class="list-marker bullet-marker" contenteditable="false">•</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ul>';
+  if(b.type==='orderedList') return '<ol class="explicit-list">'+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${esc(b.numbers?.[index]||`${index+1}.`)}</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
+  if(b.type==='choiceList') return `<ol class="choice-list explicit-list choice-${esc(b.kind||'choice')}">`+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${String.fromCharCode(65+index)}.</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
   if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
   if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
-  if(b.type==='mathBlock') return `<div class="math-block">${esc(b.content)}</div>`;
+  if(b.type==='mathBlock') return `<div class="math-block" data-tex="${esc(b.content)}" contenteditable="false">${esc(b.content)}</div>`;
   if(b.type==='divider') return '<hr>';
   if(b.type==='table') return '<table><thead><tr>'+b.header.map(x=>`<th>${inline(x)}</th>`).join('')+'</tr></thead><tbody>'+b.rows.map(r=>'<tr>'+b.header.map((_,i)=>`<td>${inline(r[i]||'')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
   return '';
 }
 
 const download=(blob,name)=>{const u=URL.createObjectURL(blob),a=Object.assign(document.createElement('a'),{href:u,download:name});a.click();setTimeout(()=>URL.revokeObjectURL(u),300);};
-const load=src=>new Promise((resolve,reject)=>{if(document.querySelector(`script[src="${src}"]`))return resolve();const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(new Error('资源加载失败'));document.head.append(s);});
+const load=src=>new Promise((resolve,reject)=>{if(document.querySelector(`script[src="${src}"]`))return resolve();const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(new Error('本地导出组件加载失败'));document.head.append(s);});
 function markdown(doc,name){download(new Blob([toMarkdown(doc)],{type:'text/markdown;charset=utf-8'}),`${name}.md`);}
-async function png(node,name){await load('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js');const canvas=await window.html2canvas(node,{scale:2,backgroundColor:'#ffffff',useCORS:true});canvas.toBlob(b=>download(b,`${name}.png`),'image/png');}
+async function png(node,name){if(!window.html2canvas)await load('./vendor/html2canvas.min.js');const canvas=await window.html2canvas(node,{scale:2,backgroundColor:'#ffffff',useCORS:true});canvas.toBlob(b=>download(b,`${name}.png`),'image/png');}
 function pdf(){window.print();}
 
-const COLORS={ink:'243247',muted:'5F6B7B',accent:'5967C8',pale:'F2F4FC',line:'DCE2EE',code:'F4F6F8',white:'FFFFFF'};
-function runs(text,D,settings,base={}){
-  const result=[], pattern=/\*\*(.+?)\*\*|__(.+?)__|~~(.+?)~~|`([^`]+)`|\*([^*\n]+)\*|_([^_\n]+)_|==(.+?)==|\^([^\^\n]+)\^|(?<!~)~([^~\n]+)~(?!~)/g;
-  let last=0,match;
-  const add=(value,options={})=>{if(value)result.push(new D.TextRun({text:value,font:{ascii:settings.fonts.latin||'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei',hAnsi:settings.fonts.latin||'Arial'},size:Math.round(settings.sizes.body*1.5),color:COLORS.ink,...base,...options}));};
-  while((match=pattern.exec(text))){add(text.slice(last,match.index));const value=match.slice(1).find(part=>part!==undefined)||'';const opts=match[1]||match[2]?{bold:true}:match[3]?{strike:true}:match[4]?{font:{ascii:settings.fonts.code||'Consolas',eastAsia:settings.fonts.code||'Consolas'},shading:{fill:'E8ECF3'},size:Math.round(settings.sizes.code*1.5)}:match[5]||match[6]?{italics:true}:match[7]?{highlight:'FFF1B8'}:match[8]?{superScript:true}:{subScript:true};add(value,opts);last=pattern.lastIndex;}
-  add(text.slice(last));return result.length?result:[new D.TextRun('')];
-}
-function para(D,text,settings,options={}){return new D.Paragraph({children:runs(text,D,settings,options.run||{}),...options});}
-function cell(D,text,settings,header=false){return new D.TableCell({children:[new D.Paragraph({children:runs(text,D,settings,{bold:header,color:header?COLORS.white:COLORS.ink}),spacing:{before:50,after:50,line:300}})],shading:{fill:header?COLORS.accent:COLORS.white},margins:{top:100,bottom:100,left:120,right:120},verticalAlign:'center'});}
-
-async function docx(doc,settings,name){
-  await load('https://unpkg.com/docx@8.5.0/build/index.umd.js');
-  const D=window.docx;if(!D)throw new Error('Word 导出组件加载失败');
-  if(/Mac|iPhone|iPad/i.test(navigator.platform)&&settings.fonts.body==='Microsoft YaHei') settings={...settings,fonts:{...settings.fonts,body:'PingFang SC'}};
-  const children=[];
-  for(const block of doc.blocks){
-    const text=block.content||'';
-    if(block.type==='title'){
-      children.push(new D.Paragraph({style:'Title',keepNext:true,spacing:{before:0,after:100,line:420},children:runs(text,D,settings,{bold:true,color:'000000',size:42})}));
-    }else if(block.type==='intro'){
-      children.push(new D.Paragraph({children:runs(text,D,settings,{color:COLORS.muted,size:22}),spacing:{after:300,line:340}}));
-    }else if(block.type==='heading'){
-      const level=Math.min(block.level||1,3), sizes={1:34,2:28,3:23};
-      children.push(new D.Paragraph({heading:`HEADING_${level}`,keepNext:true,spacing:{before:level===1?400:260,after:190,line:360},border:level===1?{top:{color:COLORS.line,space:10,style:'single',size:5}}:undefined,children:runs(text,D,settings,{bold:true,color:'000000',size:sizes[level]})}));
-    }else if(block.type==='question'){
-      children.push(new D.Paragraph({children:[new D.TextRun({text:`${block.number} `,bold:true,color:COLORS.ink,font:{ascii:'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei'},size:Math.round(settings.sizes.body*1.5)}),...runs(text,D,settings)],indent:{left:350,hanging:350},keepNext:block.kind==='choice',spacing:{before:150,after:90,line:360}}));
-    }else if(block.type==='answerItem'){
-      children.push(new D.Paragraph({children:[new D.TextRun({text:`${block.number} `,bold:true,color:COLORS.accent,font:{ascii:'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei'},size:Math.round(settings.sizes.body*1.5)}),...runs(text,D,settings)],indent:{left:350,hanging:350},spacing:{after:100,line:340}}));
-    }else if(block.type==='answerNote'){
-      children.push(para(D,text,settings,{spacing:{before:100,after:140,line:340}}));
-    }else if(block.type==='paragraph'){
-      children.push(para(D,text,settings,{spacing:{after:150,line:360},alignment:D.AlignmentType.JUSTIFIED}));
-    }else if(block.type==='bulletList'||block.type==='orderedList'){
-      block.items.forEach((item,index)=>children.push(new D.Paragraph({children:runs(item,D,settings),bullet:block.type==='bulletList'?{level:0}:undefined,numbering:block.type==='orderedList'?{reference:'main',level:0}:undefined,indent:{left:480,hanging:240},spacing:{after:90,line:330},keepLines:true})))
-    }else if(block.type==='choiceList'){
-      block.items.forEach((item,index)=>children.push(new D.Paragraph({children:[new D.TextRun({text:`${String.fromCharCode(65+index)}.`,bold:true,color:COLORS.accent,font:{ascii:'Arial',eastAsia:'Microsoft YaHei'},size:Math.round(settings.sizes.body*1.5)}),new D.TextRun({text:`  ${item}`,font:{ascii:settings.fonts.latin||'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei'},size:Math.round(settings.sizes.body*1.5),color:COLORS.ink})],indent:{left:650,hanging:300},spacing:{after:index===block.items.length-1?180:70,line:340},border:index===block.items.length-1?{bottom:{color:COLORS.line,space:8,style:'single',size:4}}:undefined,keepLines:true})))
-    }else if(block.type==='blockquote'){
-      block.content.split('\n').forEach(line=>children.push(para(D,line,settings,{indent:{left:400},border:{left:{color:COLORS.accent,space:8,style:'single',size:18}},shading:{fill:COLORS.pale},spacing:{before:40,after:120,line:340}})));
-    }else if(block.type==='codeBlock'){
-      block.content.split('\n').forEach(line=>children.push(new D.Paragraph({children:[new D.TextRun({text:line||' ',font:{ascii:settings.fonts.code||'Consolas',eastAsia:settings.fonts.code||'Consolas'},size:Math.round(settings.sizes.code*1.5),color:'344054'})],style:'CodeBlock',spacing:{after:0,line:300}})));
-    }else if(block.type==='mathBlock'){
-      children.push(new D.Paragraph({children:runs(block.content,D,settings),alignment:D.AlignmentType.CENTER,shading:{fill:COLORS.pale},spacing:{before:120,after:160,line:360}}));
-    }else if(block.type==='divider'){
-      children.push(new D.Paragraph({text:' ',border:{bottom:{color:COLORS.line,space:1,style:'single',size:6}},spacing:{before:100,after:150}}));
-    }else if(block.type==='table'){
-      const headers=block.header||[],rows=[new D.TableRow({tableHeader:true,cantSplit:true,children:headers.map(value=>cell(D,value,settings,true))}),...(block.rows||[]).map(row=>new D.TableRow({cantSplit:true,children:headers.map((_,index)=>cell(D,row[index]||'',settings,false))}))];
-      children.push(new D.Table({rows,width:{size:100,type:D.WidthType.PERCENTAGE},layout:D.TableLayoutType.AUTOFIT,cellMargin:{top:100,bottom:100,left:120,right:120},borders:{top:{style:'single',size:4,color:COLORS.line},bottom:{style:'single',size:4,color:COLORS.line},left:{style:'single',size:4,color:COLORS.line},right:{style:'single',size:4,color:COLORS.line},insideHorizontal:{style:'single',size:3,color:COLORS.line},insideVertical:{style:'single',size:3,color:COLORS.line}}}));
-      children.push(new D.Paragraph({text:'',spacing:{after:100}}));
-    }
+function canvasBlob(canvas){return new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('预览页面图生成失败')),'image/png'));}
+function pageBreaks(preview,canvas,scale,pageHeight,headings){
+  const rootTop=preview.getBoundingClientRect().top,ends=[...preview.children].map(node=>(node.getBoundingClientRect().bottom-rootTop)*scale).filter(y=>Number.isFinite(y)&&y>0).sort((a,b)=>a-b);
+  const breaks=[];let top=0;
+  while(top<canvas.height){
+    const target=Math.min(canvas.height,top+pageHeight);
+    if(target===canvas.height){breaks.push(target);break;}
+    const min=top+pageHeight*.5;
+    const candidates=ends.filter(y=>y>=min&&y<=target);
+    let end=candidates.length?candidates.at(-1):target;
+    const headingCount=headings.filter(item=>item.top>=top-1&&item.top<end).length;
+    const maxContentEnd=Math.min(target,top+pageHeight-Math.ceil(scale*(12+headingCount*44)));
+    if(end>maxContentEnd){const safe=ends.filter(y=>y>=min&&y<=maxContentEnd);end=safe.length?safe.at(-1):maxContentEnd}
+    end=Math.max(top+1,Math.min(end,canvas.height));
+    breaks.push(end);top=end;
   }
-  const file=new D.Document({styles:{default:{document:{run:{font:{ascii:settings.fonts.latin||'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei',hAnsi:settings.fonts.latin||'Arial'},size:24,color:COLORS.ink},paragraph:{spacing:{after:150,line:360}}}},paragraphStyles:[{id:'CodeBlock',name:'Code Block',basedOn:'Normal',paragraph:{shading:{fill:COLORS.code},indent:{left:220},spacing:{before:0,after:0,line:300}},run:{font:{ascii:settings.fonts.code||'Consolas',eastAsia:settings.fonts.code||'Consolas'},size:19,color:'344054'}}]},sections:[{properties:{page:{size:settings.page.orientation==='landscape'?{width:16838,height:11906}:{width:11906,height:16838},margin:{top:1440,right:1440,bottom:1440,left:1440}}},children}],numbering:{config:[{reference:'main',levels:[{level:0,format:'decimal',text:'%1.',alignment:'left',style:{paragraph:{indent:{left:480,hanging:240}}}}]}]}});
+  return breaks;
+}
+function twips(mm){return Math.round(mm/25.4*1440)}
+
+async function docx(_doc,settings,name,preview){
+  if(!preview||!preview.isConnected)throw new Error('请先打开文档预览再导出 Word');
+  if(!window.docx)await load('./vendor/docx.umd.js');
+  if(!window.html2canvas)await load('./vendor/html2canvas.min.js');
+  if(document.fonts?.ready)await document.fonts.ready;
+  const D=window.docx,rect=preview.getBoundingClientRect(),width=preview.scrollWidth||Math.round(rect.width),height=preview.scrollHeight;
+  if(!width||!height)throw new Error('预览内容为空，无法导出 Word');
+  const scale=Math.max(.6,Math.min(2,24000/height,Math.sqrt(36000000/(width*height))));
+  const canvas=await window.html2canvas(preview,{scale,backgroundColor:'#ffffff',width,height,useCORS:true,logging:false,windowWidth:document.documentElement.clientWidth,windowHeight:document.documentElement.clientHeight});
+  const isLetter=settings.page.size==='Letter',portraitWidth=isLetter?215.9:210,portraitHeight=isLetter?279.4:297;
+  const pageWidthMm=settings.page.orientation==='landscape'?portraitHeight:portraitWidth;
+  const pageHeightMm=settings.page.orientation==='landscape'?portraitWidth:portraitHeight;
+  const headings=[...preview.querySelectorAll('h1,h2,h3')].map(node=>({top:(node.getBoundingClientRect().top-preview.getBoundingClientRect().top)*scale,level:Number(node.tagName[1]),text:node.textContent.trim()}));
+  const pageHeight=Math.max(100,Math.round(canvas.width*pageHeightMm/pageWidthMm)-Math.ceil(scale*8)),breaks=pageBreaks(preview,canvas,scale,pageHeight,headings),pageWidthPx=pageWidthMm/25.4*96;
+  const pages=[];let top=0;
+  for(const end of breaks){
+    const slice=document.createElement('canvas');slice.width=canvas.width;slice.height=Math.max(1,Math.ceil(end-top));
+    slice.getContext('2d').drawImage(canvas,0,top,canvas.width,slice.height,0,0,canvas.width,slice.height);
+    const blob=await canvasBlob(slice),data=new Uint8Array(await blob.arrayBuffer());
+    const imageHeightPx=(slice.height/scale)*(pageWidthPx/width);
+    pages.push({data,height:imageHeightPx,top,end,headings:headings.filter(item=>item.top>=top-1&&item.top<end)});top=end;
+  }
+  const pageWidth=twips(pageWidthMm),pageHeightTwips=twips(pageHeightMm);
+  const children=[];
+  pages.forEach((page,index)=>{
+    children.push(new D.Paragraph({pageBreakBefore:index>0,spacing:{before:0,after:0,line:1},children:[new D.ImageRun({data:page.data,transformation:{width:pageWidthPx,height:page.height},altText:{title:`预览页面 ${index+1}`,description:'来自网页预览的页面图像；如需更改文字，请回到 Text to MD 编辑源文本。'}})]}));
+    page.headings.forEach(heading=>children.push(new D.Paragraph({heading:D.HeadingLevel[`HEADING_${Math.min(heading.level,3)}`],keepNext:false,spacing:{before:0,after:0,line:1},children:[new D.TextRun({text:heading.text,vanish:true,specVanish:true,size:1,color:'FFFFFF'})]})));
+  });
+  const file=new D.Document({sections:[{properties:{page:{size:{width:pageWidth,height:pageHeightTwips},margin:{top:0,right:0,bottom:0,left:0}}},children}]});
   download(await D.Packer.toBlob(file),`${name}.docx`);
 }
 
@@ -282,8 +302,8 @@ function render(){
   sourceDirty=false;history=[];future=[];push();applySettings();
 }
 async function enhancePreview(){
-  const math=[...preview.querySelectorAll('.math-block')];
-  if(math.length)try{if(!window.katex){const css=document.createElement('link');css.rel='stylesheet';css.href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';document.head.append(css);await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)})}math.forEach(n=>window.katex.render(n.textContent,n,{throwOnError:false,displayMode:true}))}catch{notify('公式暂时以原始文本显示。')}
+  const math=[...preview.querySelectorAll('.math,.math-block')].filter(node=>!node.dataset.rendered);
+  if(math.length)try{if(!window.katex){const css=document.createElement('link');css.rel='stylesheet';css.href='./vendor/katex/katex.min.css';document.head.append(css);await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='./vendor/katex/katex.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)})}math.forEach(node=>{const formula=node.dataset.tex||node.textContent;node.dataset.tex=formula;window.katex.render(formula,node,{throwOnError:false,displayMode:node.classList.contains('math-block')});node.dataset.rendered='true'})}catch{notify('公式暂时以原始文本显示。')}
   const codes=[...preview.querySelectorAll('pre code')];
   if(codes.length)try{if(!window.hljs)await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/build/highlight.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)});codes.forEach(n=>window.hljs.highlightElement(n))}catch{}
 }
@@ -306,7 +326,7 @@ function inlineMarkdown(node){
   if(tag==='strong'||tag==='b')return `**${children}**`;if(tag==='em'||tag==='i')return `*${children}*`;
   if(tag==='s'||tag==='del'||tag==='strike')return `~~${children}~~`;if(tag==='sup')return `^${children}^`;if(tag==='sub')return `~${children}~`;
   if(tag==='mark')return `==${children}==`;if(tag==='code'&&node.parentElement?.tagName!=='PRE')return `\`${node.textContent}\``;
-  if(node.classList.contains('math'))return `$${node.textContent}$`;
+  if(node.classList.contains('math'))return `\\(${node.dataset.tex||node.textContent}\\)`;
   return children;
 }
 function serializePreview(){
@@ -315,14 +335,14 @@ function serializePreview(){
     if(/^h[1-6]$/.test(tag))return `${'#'.repeat(Number(tag[1]))} ${text}`;
     if(tag==='p')return text;
     if(tag==='blockquote')return text.split('\n').map(line=>`> ${line}`).join('\n');
-    if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>`${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${[...item.childNodes].map(inlineMarkdown).join('').trim()}`).join('\n');
+    if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>{const body=[...item.childNodes].filter(child=>!(child.nodeType===Node.ELEMENT_NODE&&child.classList.contains('list-marker'))).map(inlineMarkdown).join('').trim();return `${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${body}`}).join('\n');
     if(tag==='pre')return `\`\`\`${node.dataset.language||''}\n${node.textContent}\n\`\`\``;
     if(tag==='hr')return '---';
     if(tag==='table'){
       const rows=[...node.querySelectorAll('tr')].map(row=>[...row.children].map(cell=>[...cell.childNodes].map(inlineMarkdown).join('').replace(/\|/g,'\\|')));
       return rows.length?`| ${rows[0].join(' | ')} |\n| ${rows[0].map(()=> '---').join(' | ')} |${rows.slice(1).map(row=>`\n| ${row.join(' | ')} |`).join('')}`:'';
     }
-    if(node.classList.contains('math-block'))return `$$\n${node.textContent}\n$$`;
+    if(node.classList.contains('math-block'))return `$$\n${node.dataset.tex||node.textContent}\n$$`;
     return text;
   }).filter(Boolean).join('\n\n');
 }
@@ -349,7 +369,17 @@ function panel(kind){
 $('#auto-format').onclick=()=>format();$('#open-preview').onclick=openPreview;$('#close-preview').onclick=closePreview;
 $('#template-button').onclick=()=>panel('template');$('#style-button').onclick=()=>panel('style');$('#page-button').onclick=()=>panel('page');$('#close-panel').onclick=()=>$('#settings-panel').hidden=true;
 $('#export-menu').onclick=()=>$('#export-popover').hidden=!$('#export-popover').hidden;
-document.querySelectorAll('[data-export]').forEach(button=>button.onclick=async()=>{try{if(sourceDirty)format();const kind=button.dataset.export;setStatus('正在准备导出…');if(kind==='md')out.markdown(doc,fileName);if(kind==='docx')await out.docx(doc,settings,fileName);if(kind==='pdf')out.pdf();if(kind==='png')await out.png(preview,fileName);setStatus('导出已准备完成');$('#export-popover').hidden=true}catch(error){console.error(error);notify('导出失败，请重试。');setStatus('导出失败')}});
+document.querySelectorAll('[data-export]').forEach(button=>button.onclick=async()=>{
+  try{
+    if(sourceDirty)format();
+    const kind=button.dataset.export;setStatus('正在准备导出…');
+    if(kind==='md')out.markdown(doc,fileName);
+    if(kind==='docx'){if(!previewPane.classList.contains('visible'))openPreview();await enhancePreview();await out.docx(doc,settings,fileName,preview)}
+    if(kind==='pdf')out.pdf();
+    if(kind==='png')await out.png(preview,fileName);
+    setStatus('导出已准备完成');$('#export-popover').hidden=true
+  }catch(error){console.error(error);notify('导出失败，请重试。');setStatus('导出失败')}
+});
 content.addEventListener('input',()=>{sourceDirty=true;updateCount();setStatus('输入已更新，预览时将重新排版')});
 preview.addEventListener('input',()=>{if(history.at(-1)!==preview.innerHTML){history.push(preview.innerHTML);if(history.length>40)history.shift();future=[]}syncPreview()});
 $('#file-input').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>5*1024*1024)return notify('文件超过 5MB，请拆分后导入。');try{content.value=await file.text();fileName=file.name.replace(/\.[^.]+$/,'');sourceDirty=true;updateCount();format()}catch{notify('文件读取失败，请确认编码后重试。')}};

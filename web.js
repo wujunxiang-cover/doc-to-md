@@ -28,8 +28,8 @@ function render(){
   sourceDirty=false;history=[];future=[];push();applySettings();
 }
 async function enhancePreview(){
-  const math=[...preview.querySelectorAll('.math-block')];
-  if(math.length)try{if(!window.katex){const css=document.createElement('link');css.rel='stylesheet';css.href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css';document.head.append(css);await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)})}math.forEach(n=>window.katex.render(n.textContent,n,{throwOnError:false,displayMode:true}))}catch{notify('公式暂时以原始文本显示。')}
+  const math=[...preview.querySelectorAll('.math,.math-block')].filter(node=>!node.dataset.rendered);
+  if(math.length)try{if(!window.katex){const css=document.createElement('link');css.rel='stylesheet';css.href='./vendor/katex/katex.min.css';document.head.append(css);await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='./vendor/katex/katex.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)})}math.forEach(node=>{const formula=node.dataset.tex||node.textContent;node.dataset.tex=formula;window.katex.render(formula,node,{throwOnError:false,displayMode:node.classList.contains('math-block')});node.dataset.rendered='true'})}catch{notify('公式暂时以原始文本显示。')}
   const codes=[...preview.querySelectorAll('pre code')];
   if(codes.length)try{if(!window.hljs)await new Promise((ok,bad)=>{const script=document.createElement('script');script.src='https://cdn.jsdelivr.net/npm/highlight.js@11.10.0/build/highlight.min.js';script.onload=ok;script.onerror=bad;document.head.append(script)});codes.forEach(n=>window.hljs.highlightElement(n))}catch{}
 }
@@ -52,7 +52,7 @@ function inlineMarkdown(node){
   if(tag==='strong'||tag==='b')return `**${children}**`;if(tag==='em'||tag==='i')return `*${children}*`;
   if(tag==='s'||tag==='del'||tag==='strike')return `~~${children}~~`;if(tag==='sup')return `^${children}^`;if(tag==='sub')return `~${children}~`;
   if(tag==='mark')return `==${children}==`;if(tag==='code'&&node.parentElement?.tagName!=='PRE')return `\`${node.textContent}\``;
-  if(node.classList.contains('math'))return `$${node.textContent}$`;
+  if(node.classList.contains('math'))return `\\(${node.dataset.tex||node.textContent}\\)`;
   return children;
 }
 function serializePreview(){
@@ -61,14 +61,14 @@ function serializePreview(){
     if(/^h[1-6]$/.test(tag))return `${'#'.repeat(Number(tag[1]))} ${text}`;
     if(tag==='p')return text;
     if(tag==='blockquote')return text.split('\n').map(line=>`> ${line}`).join('\n');
-    if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>`${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${[...item.childNodes].map(inlineMarkdown).join('').trim()}`).join('\n');
+    if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>{const body=[...item.childNodes].filter(child=>!(child.nodeType===Node.ELEMENT_NODE&&child.classList.contains('list-marker'))).map(inlineMarkdown).join('').trim();return `${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${body}`}).join('\n');
     if(tag==='pre')return `\`\`\`${node.dataset.language||''}\n${node.textContent}\n\`\`\``;
     if(tag==='hr')return '---';
     if(tag==='table'){
       const rows=[...node.querySelectorAll('tr')].map(row=>[...row.children].map(cell=>[...cell.childNodes].map(inlineMarkdown).join('').replace(/\|/g,'\\|')));
       return rows.length?`| ${rows[0].join(' | ')} |\n| ${rows[0].map(()=> '---').join(' | ')} |${rows.slice(1).map(row=>`\n| ${row.join(' | ')} |`).join('')}`:'';
     }
-    if(node.classList.contains('math-block'))return `$$\n${node.textContent}\n$$`;
+    if(node.classList.contains('math-block'))return `$$\n${node.dataset.tex||node.textContent}\n$$`;
     return text;
   }).filter(Boolean).join('\n\n');
 }
@@ -95,7 +95,17 @@ function panel(kind){
 $('#auto-format').onclick=()=>format();$('#open-preview').onclick=openPreview;$('#close-preview').onclick=closePreview;
 $('#template-button').onclick=()=>panel('template');$('#style-button').onclick=()=>panel('style');$('#page-button').onclick=()=>panel('page');$('#close-panel').onclick=()=>$('#settings-panel').hidden=true;
 $('#export-menu').onclick=()=>$('#export-popover').hidden=!$('#export-popover').hidden;
-document.querySelectorAll('[data-export]').forEach(button=>button.onclick=async()=>{try{if(sourceDirty)format();const kind=button.dataset.export;setStatus('正在准备导出…');if(kind==='md')out.markdown(doc,fileName);if(kind==='docx')await out.docx(doc,settings,fileName);if(kind==='pdf')out.pdf();if(kind==='png')await out.png(preview,fileName);setStatus('导出已准备完成');$('#export-popover').hidden=true}catch(error){console.error(error);notify('导出失败，请重试。');setStatus('导出失败')}});
+document.querySelectorAll('[data-export]').forEach(button=>button.onclick=async()=>{
+  try{
+    if(sourceDirty)format();
+    const kind=button.dataset.export;setStatus('正在准备导出…');
+    if(kind==='md')out.markdown(doc,fileName);
+    if(kind==='docx'){if(!previewPane.classList.contains('visible'))openPreview();await enhancePreview();await out.docx(doc,settings,fileName,preview)}
+    if(kind==='pdf')out.pdf();
+    if(kind==='png')await out.png(preview,fileName);
+    setStatus('导出已准备完成');$('#export-popover').hidden=true
+  }catch(error){console.error(error);notify('导出失败，请重试。');setStatus('导出失败')}
+});
 content.addEventListener('input',()=>{sourceDirty=true;updateCount();setStatus('输入已更新，预览时将重新排版')});
 preview.addEventListener('input',()=>{if(history.at(-1)!==preview.innerHTML){history.push(preview.innerHTML);if(history.length>40)history.shift();future=[]}syncPreview()});
 $('#file-input').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>5*1024*1024)return notify('文件超过 5MB，请拆分后导入。');try{content.value=await file.text();fileName=file.name.replace(/\.[^.]+$/,'');sourceDirty=true;updateCount();format()}catch{notify('文件读取失败，请确认编码后重试。')}};
