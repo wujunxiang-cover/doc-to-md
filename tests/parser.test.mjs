@@ -64,6 +64,15 @@ test('recognizes procedure lists, code examples, and arrow workflows',()=>{
   assert.match(blockHtml(flow),/class="flow-diagram"/);
 });
 
+test('recognizes compact two-step flows and preserves multi-operator relations',()=>{
+  const document=parse('down ↓ up\n\n当前图像 = 大尺度结构 + 细节\n\n特征层\n↓\n下采样\n↓\n下一层');
+  assert.deepEqual(document.blocks[0],{type:'flowDiagram',steps:['down','up'],connectors:['↓']});
+  assert.deepEqual(document.blocks[1],{type:'operatorSequence',steps:['当前图像','大尺度结构','细节'],connectors:['=','+']});
+  assert.deepEqual(document.blocks[2],{type:'flowDiagram',steps:['特征层','下采样','下一层'],connectors:['↓','↓']});
+  assert.match(blockHtml(document.blocks[1]),/class="flow-diagram relation-diagram"/);
+  assert.match(toMarkdown(document),/当前图像 = 大尺度结构 \+ 细节/);
+});
+
 test('cleans redundant whitespace and joins accidental wrapped paragraph lines',()=>{
   const document=parse('  这是  一 段\n被复制后 断开的 文字 ，应该整理。\n\n\n下一段。  ');
   assert.equal(document.blocks[0].content,'这是一段被复制后断开的文字，应该整理。');

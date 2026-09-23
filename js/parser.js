@@ -94,9 +94,37 @@ const joinSoftLines = lines => lines.reduce((joined,line)=>{
   if(!joined)return line;
   return joined+(/[A-Za-z0-9]$/.test(joined)&&/^[A-Za-z0-9]/.test(line)?' ':'')+line;
 },'');
-function flowSteps(text){
-  const parts=text.split(/\s*(?:→|➜|⇒|⟶|->|-->)\s*/).map(step=>step.trim()).filter(Boolean);
-  return parts.length>=3&&parts.every(part=>part.length<=70)?parts:null;
+const sequencePattern = /(-->|⟶|⇄|↔|⇒|➜|→|←|↑|↓|->|=|≈|≠|≤|≥|\+|×|÷|−)/g;
+const arrowOperators = new Set(['-->', '⟶', '⇄', '↔', '⇒', '➜', '→', '←', '↑', '↓', '->']);
+const operatorOnly = /^(?:-->|⟶|⇄|↔|⇒|➜|→|←|↑|↓|->|=|≈|≠|≤|≥|\+|×|÷|−)$/;
+function parseOperatorSequence(text){
+  const source=String(text).trim(),steps=[],connectors=[];
+  let cursor=0,match;sequencePattern.lastIndex=0;
+  while((match=sequencePattern.exec(source))){
+    const step=source.slice(cursor,match.index).trim();
+    if(!step)return null;
+    steps.push(step);connectors.push(match[0]);cursor=sequencePattern.lastIndex;
+  }
+  if(!connectors.length)return null;
+  const last=source.slice(cursor).trim();
+  if(!last)return null;
+  steps.push(last);
+  if(steps.length!==connectors.length+1||steps.some(step=>step.length>70))return null;
+  const isFlow=connectors.some(operator=>arrowOperators.has(operator));
+  if(!isFlow&&/[。！？!?；;]$/.test(source))return null;
+  return {type:isFlow?'flowDiagram':'operatorSequence',steps,connectors};
+}
+function parseMultilineOperatorSequence(lines,index){
+  const first=String(lines[index]||'').trim();
+  if(!first||first.length>70)return null;
+  const steps=[first],connectors=[];let cursor=index+1;
+  while(cursor+1<lines.length){
+    const operator=String(lines[cursor]||'').trim(),next=String(lines[cursor+1]||'').trim();
+    if(!operatorOnly.test(operator)||!next||next.length>70)break;
+    connectors.push(operator);steps.push(next);cursor+=2;
+  }
+  if(!connectors.length||(!connectors.some(operator=>arrowOperators.has(operator))&&connectors.length<2))return null;
+  return {type:connectors.some(operator=>arrowOperators.has(operator))?'flowDiagram':'operatorSequence',steps,connectors,nextIndex:cursor};
 }
 const codeLanguage = (text, context='') => {
   const source=`${context}\n${text}`;
@@ -150,6 +178,8 @@ export function parse(text) {
       else doc.blocks.push({type:'heading',level:Math.min(m[1].length,3),content,category:kind||undefined});
       activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;
     }
+    const multilineSequence=parseMultilineOperatorSequence(lines,i);
+    if(multilineSequence){const {nextIndex,...block}=multilineSequence;doc.blocks.push(block);i=nextIndex;continue;}
     if (i + 1 < lines.length && /^\s*(?:=+|-{3,})\s*$/.test(lines[i+1]) && t.length) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i += 2; continue;
     }
@@ -172,8 +202,8 @@ export function parse(text) {
         doc.blocks.push({type:'codeBlock',language:codeLanguage(content,inCodeSection?previous.content:''),content});i=j;continue;
       }
     }
-    const flow=flowSteps(t);
-    if(flow){doc.blocks.push({type:'flowDiagram',steps:flow});i++;continue;}
+    const sequence=parseOperatorSequence(t)||parseMultilineOperatorSequence(lines,i);
+    if(sequence){const {nextIndex,...block}=sequence;doc.blocks.push(block);i=nextIndex??i+1;continue;}
     const nextNonEmpty=lines.slice(i+1).find(line=>line.trim())||'';
     const questionContext=Boolean(activeQuestionKind||choiceLine(nextNonEmpty)||choiceParts(orderedInfo(t)?.content||''));
     // Question numbering must be interpreted before generic heading heuristics.
@@ -187,7 +217,7 @@ export function parse(text) {
       if(choices?.items.length) doc.blocks.push({type:'choiceList',items:choices.items,kind});
       i++;continue;
     }
-    const nextStructured=listMatch(nextNonEmpty)||orderedMatch(nextNonEmpty)||flowSteps(nextNonEmpty)||codeLineScore(nextNonEmpty)>=2;
+    const nextStructured=listMatch(nextNonEmpty)||orderedMatch(nextNonEmpty)||parseOperatorSequence(nextNonEmpty)||codeLineScore(nextNonEmpty)>=2;
     if(!questionContext&&!numbered&&!sectionKind(t)&&!listMatch(t)&&!orderedMatch(t)&&!choiceLine(t)&&!/^#{1,6}\s/.test(t)&&nextStructured&&t.length<=32&&!/[。！？!?；;：:]$/.test(t)){
       doc.blocks.push({type:'heading',level:doc.blocks.some(block=>block.type==='title')?2:1,content:t});i++;continue;
     }
@@ -258,7 +288,7 @@ export function toMarkdown(doc) {
     if(b.type==='choiceList') return b.items.map((x,i)=>`${String.fromCharCode(65+i)}. ${x}`).join('\n');
     if(b.type==='blockquote') return b.content.split('\n').map(x=>'> '+x).join('\n');
     if(b.type==='codeBlock') return '```'+(b.language||'')+'\n'+b.content+'\n```';
-    if(b.type==='flowDiagram') return b.steps.join(' → ');
+    if(b.type==='flowDiagram'||b.type==='operatorSequence') return b.steps.map((step,index)=>`${index?` ${b.connectors?.[index-1]||'→'} `:''}${step}`).join('');
     if(b.type==='mathBlock') return '$$\n'+b.content+'\n$$';
     if(b.type==='divider') return '---';
     if(b.type==='table') return '| '+b.header.join(' | ')+' |\n| '+b.header.map(()=>'---').join(' | ')+' |\n'+b.rows.map(r=>'| '+r.join(' | ')+' |').join('\n');
@@ -280,7 +310,7 @@ export function blockHtml(b, settings={}) {
   if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
   if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
   if(b.type==='mathBlock') return `<div class="math-block" data-tex="${esc(b.content)}" contenteditable="false">${esc(b.content)}</div>`;
-  if(b.type==='flowDiagram') return `<div class="flow-diagram" aria-label="流程图">${b.steps.map((step,index)=>`${index?'<span class="flow-arrow" aria-hidden="true">→</span>':''}<span class="flow-step">${inline(step)}</span>`).join('')}</div>`;
+  if(b.type==='flowDiagram'||b.type==='operatorSequence') return `<div class="flow-diagram${b.type==='operatorSequence'?' relation-diagram':''}" aria-label="${b.type==='flowDiagram'?'流程':'关系式'}">${b.steps.map((step,index)=>`${index?`<span class="flow-operator" aria-hidden="true">${esc(b.connectors?.[index-1]||'→')}</span>`:''}<span class="flow-step">${inline(step)}</span>`).join('')}</div>`;
   if(b.type==='divider') return '<hr>';
   if(b.type==='table') return '<table><thead><tr>'+b.header.map(x=>`<th>${inline(x)}</th>`).join('')+'</tr></thead><tbody>'+b.rows.map(r=>'<tr>'+b.header.map((_,i)=>`<td>${inline(r[i]||'')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
   return '';

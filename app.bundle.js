@@ -209,9 +209,37 @@ const joinSoftLines = lines => lines.reduce((joined,line)=>{
   if(!joined)return line;
   return joined+(/[A-Za-z0-9]$/.test(joined)&&/^[A-Za-z0-9]/.test(line)?' ':'')+line;
 },'');
-function flowSteps(text){
-  const parts=text.split(/\s*(?:→|➜|⇒|⟶|->|-->)\s*/).map(step=>step.trim()).filter(Boolean);
-  return parts.length>=3&&parts.every(part=>part.length<=70)?parts:null;
+const sequencePattern = /(-->|⟶|⇄|↔|⇒|➜|→|←|↑|↓|->|=|≈|≠|≤|≥|\+|×|÷|−)/g;
+const arrowOperators = new Set(['-->', '⟶', '⇄', '↔', '⇒', '➜', '→', '←', '↑', '↓', '->']);
+const operatorOnly = /^(?:-->|⟶|⇄|↔|⇒|➜|→|←|↑|↓|->|=|≈|≠|≤|≥|\+|×|÷|−)$/;
+function parseOperatorSequence(text){
+  const source=String(text).trim(),steps=[],connectors=[];
+  let cursor=0,match;sequencePattern.lastIndex=0;
+  while((match=sequencePattern.exec(source))){
+    const step=source.slice(cursor,match.index).trim();
+    if(!step)return null;
+    steps.push(step);connectors.push(match[0]);cursor=sequencePattern.lastIndex;
+  }
+  if(!connectors.length)return null;
+  const last=source.slice(cursor).trim();
+  if(!last)return null;
+  steps.push(last);
+  if(steps.length!==connectors.length+1||steps.some(step=>step.length>70))return null;
+  const isFlow=connectors.some(operator=>arrowOperators.has(operator));
+  if(!isFlow&&/[。！？!?；;]$/.test(source))return null;
+  return {type:isFlow?'flowDiagram':'operatorSequence',steps,connectors};
+}
+function parseMultilineOperatorSequence(lines,index){
+  const first=String(lines[index]||'').trim();
+  if(!first||first.length>70)return null;
+  const steps=[first],connectors=[];let cursor=index+1;
+  while(cursor+1<lines.length){
+    const operator=String(lines[cursor]||'').trim(),next=String(lines[cursor+1]||'').trim();
+    if(!operatorOnly.test(operator)||!next||next.length>70)break;
+    connectors.push(operator);steps.push(next);cursor+=2;
+  }
+  if(!connectors.length||(!connectors.some(operator=>arrowOperators.has(operator))&&connectors.length<2))return null;
+  return {type:connectors.some(operator=>arrowOperators.has(operator))?'flowDiagram':'operatorSequence',steps,connectors,nextIndex:cursor};
 }
 const codeLanguage = (text, context='') => {
   const source=`${context}\n${text}`;
@@ -265,6 +293,8 @@ function parse(text) {
       else doc.blocks.push({type:'heading',level:Math.min(m[1].length,3),content,category:kind||undefined});
       activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;
     }
+    const multilineSequence=parseMultilineOperatorSequence(lines,i);
+    if(multilineSequence){const {nextIndex,...block}=multilineSequence;doc.blocks.push(block);i=nextIndex;continue;}
     if (i + 1 < lines.length && /^\s*(?:=+|-{3,})\s*$/.test(lines[i+1]) && t.length) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i += 2; continue;
     }
@@ -287,8 +317,8 @@ function parse(text) {
         doc.blocks.push({type:'codeBlock',language:codeLanguage(content,inCodeSection?previous.content:''),content});i=j;continue;
       }
     }
-    const flow=flowSteps(t);
-    if(flow){doc.blocks.push({type:'flowDiagram',steps:flow});i++;continue;}
+    const sequence=parseOperatorSequence(t)||parseMultilineOperatorSequence(lines,i);
+    if(sequence){const {nextIndex,...block}=sequence;doc.blocks.push(block);i=nextIndex??i+1;continue;}
     const nextNonEmpty=lines.slice(i+1).find(line=>line.trim())||'';
     const questionContext=Boolean(activeQuestionKind||choiceLine(nextNonEmpty)||choiceParts(orderedInfo(t)?.content||''));
     // Question numbering must be interpreted before generic heading heuristics.
@@ -302,7 +332,7 @@ function parse(text) {
       if(choices?.items.length) doc.blocks.push({type:'choiceList',items:choices.items,kind});
       i++;continue;
     }
-    const nextStructured=listMatch(nextNonEmpty)||orderedMatch(nextNonEmpty)||flowSteps(nextNonEmpty)||codeLineScore(nextNonEmpty)>=2;
+    const nextStructured=listMatch(nextNonEmpty)||orderedMatch(nextNonEmpty)||parseOperatorSequence(nextNonEmpty)||codeLineScore(nextNonEmpty)>=2;
     if(!questionContext&&!numbered&&!sectionKind(t)&&!listMatch(t)&&!orderedMatch(t)&&!choiceLine(t)&&!/^#{1,6}\s/.test(t)&&nextStructured&&t.length<=32&&!/[。！？!?；;：:]$/.test(t)){
       doc.blocks.push({type:'heading',level:doc.blocks.some(block=>block.type==='title')?2:1,content:t});i++;continue;
     }
@@ -373,7 +403,7 @@ function toMarkdown(doc) {
     if(b.type==='choiceList') return b.items.map((x,i)=>`${String.fromCharCode(65+i)}. ${x}`).join('\n');
     if(b.type==='blockquote') return b.content.split('\n').map(x=>'> '+x).join('\n');
     if(b.type==='codeBlock') return '```'+(b.language||'')+'\n'+b.content+'\n```';
-    if(b.type==='flowDiagram') return b.steps.join(' → ');
+    if(b.type==='flowDiagram'||b.type==='operatorSequence') return b.steps.map((step,index)=>`${index?` ${b.connectors?.[index-1]||'→'} `:''}${step}`).join('');
     if(b.type==='mathBlock') return '$$\n'+b.content+'\n$$';
     if(b.type==='divider') return '---';
     if(b.type==='table') return '| '+b.header.join(' | ')+' |\n| '+b.header.map(()=>'---').join(' | ')+' |\n'+b.rows.map(r=>'| '+r.join(' | ')+' |').join('\n');
@@ -395,7 +425,7 @@ function blockHtml(b, settings={}) {
   if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
   if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
   if(b.type==='mathBlock') return `<div class="math-block" data-tex="${esc(b.content)}" contenteditable="false">${esc(b.content)}</div>`;
-  if(b.type==='flowDiagram') return `<div class="flow-diagram" aria-label="流程图">${b.steps.map((step,index)=>`${index?'<span class="flow-arrow" aria-hidden="true">→</span>':''}<span class="flow-step">${inline(step)}</span>`).join('')}</div>`;
+  if(b.type==='flowDiagram'||b.type==='operatorSequence') return `<div class="flow-diagram${b.type==='operatorSequence'?' relation-diagram':''}" aria-label="${b.type==='flowDiagram'?'流程':'关系式'}">${b.steps.map((step,index)=>`${index?`<span class="flow-operator" aria-hidden="true">${esc(b.connectors?.[index-1]||'→')}</span>`:''}<span class="flow-step">${inline(step)}</span>`).join('')}</div>`;
   if(b.type==='divider') return '<hr>';
   if(b.type==='table') return '<table><thead><tr>'+b.header.map(x=>`<th>${inline(x)}</th>`).join('')+'</tr></thead><tbody>'+b.rows.map(r=>'<tr>'+b.header.map((_,i)=>`<td>${inline(r[i]||'')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
   return '';
@@ -468,6 +498,7 @@ function pdf(name,settings){
 }
 
 const PALETTES={clean:{ink:'26354D',muted:'66748A',accent:'315BCB',pale:'F1F4FA',line:'D9E0EA',code:'20283A'},business:{ink:'26364A',muted:'64758A',accent:'245184',pale:'EFF4F9',line:'D6E0EA',code:'202A38'},academic:{ink:'302B2A',muted:'70625F',accent:'762F38',pale:'F7F1EF',line:'E5D8D5',code:'28252A'},study:{ink:'283A32',muted:'66776E',accent:'47765E',pale:'EFF5F0',line:'D8E3DB',code:'26352D'},report:{ink:'26364A',muted:'64758A',accent:'245184',pale:'EFF4F9',line:'D6E0EA',code:'202A38'},modern:{ink:'292929',muted:'6B6B6B',accent:'3F3F3F',pale:'F3F3F3',line:'DDDDDD',code:'252525'},official:{ink:'222222',muted:'555555',accent:'9A2C2C',pale:'F5EFEF',line:'DDCECE',code:'282525'},notion:{ink:'292929',muted:'6B6B6B',accent:'3F3F3F',pale:'F3F3F3',line:'DDDDDD',code:'252525'},github:{ink:'24292F',muted:'656D76',accent:'0969DA',pale:'F6F8FA',line:'D0D7DE',code:'24292F'}};
+const DOCX_PALETTE={ink:'111111',muted:'333333',accent:'111111',pale:'F2F2F2',line:'BFBFBF',code:'EEEEEE'};
 const greek={alpha:'α',beta:'β',gamma:'γ',delta:'δ',epsilon:'ε',theta:'θ',lambda:'λ',mu:'μ',pi:'π',rho:'ρ',sigma:'σ',tau:'τ',phi:'φ',omega:'ω',Gamma:'Γ',Delta:'Δ',Theta:'Θ',Lambda:'Λ',Pi:'Π',Sigma:'Σ',Phi:'Φ',Omega:'Ω'};
 const symbols={times:'×',cdot:'·',leq:'≤',le:'≤',geq:'≥',ge:'≥',neq:'≠',approx:'≈',equiv:'≡',pm:'±',infty:'∞',rightarrow:'→',to:'→',Rightarrow:'⇒',leftarrow:'←',sum:'∑',prod:'∏',partial:'∂',nabla:'∇'};
 const fontOptions=settings=>({ascii:settings.fonts.latin||'Arial',hAnsi:settings.fonts.latin||'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei',cs:settings.fonts.latin||'Arial',hint:'eastAsia'});
@@ -479,7 +510,7 @@ function mathSource(tex){
   source=source.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g,'$1⁄$2').replace(/\\sqrt\{([^{}]+)\}/g,'√$1');
   return source.replace(/\\([A-Za-z]+)/g,(_match,name)=>greek[name]||symbols[name]||name);
 }
-function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.max(settings.sizes.body||15,15))){
+function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.max(settings.sizes.body||14,14))){
   const font=fontOptions(settings),normal={font,language:{value:'en-US',eastAsia:'zh-CN'},size:bodySize,color:palette.ink,characterSpacing:Math.round((settings.paragraph.letterSpacing||0)*15),...base};
   const tokens=/!\[[^\]]*\]\([^)]+\)|\\\([\s\S]+?\\\)|\$(?!\$)[^$\n]+\$|`[^`\n]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|~~[\s\S]+?~~|==[\s\S]+?==|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_)|\^[^^\n]+\^|(?<!~)~[^~\n]+~(?!~)|\[[^\]]+\]\([^)]+\)/g;
   const result=[];
@@ -507,7 +538,7 @@ function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.m
     else if(token.startsWith('`'))add(token.slice(1,-1),{font:{ascii:settings.fonts.code||'Consolas',hAnsi:settings.fonts.code||'Consolas',eastAsia:settings.fonts.code||'Consolas'},size:pxToHalfPoints(settings.sizes.code||13),shading:{fill:palette.pale}});
     else if(token.startsWith('**')||token.startsWith('__'))add(token.slice(2,-2),{bold:true});
     else if(token.startsWith('~~'))add(token.slice(2,-2),{strike:true});
-    else if(token.startsWith('=='))add(token.slice(2,-2),{highlight:'FFF1B8'});
+    else if(token.startsWith('=='))add(token.slice(2,-2),{highlight:'EEEEEE'});
     else if(token.startsWith('^'))add(token.slice(1,-1),{superScript:true});
     else if(token.startsWith('~'))add(token.slice(1,-1),{subScript:true});
     else if(token.startsWith('*')||token.startsWith('_'))add(token.slice(1,-1),{italics:true});
@@ -536,11 +567,11 @@ function pageDimensions(settings){
   return {page:settings.page.orientation==='landscape'?{width:portrait.height,height:portrait.width}:portrait,margin:marginTwips};
 }
 function blockParagraphs(block,D,settings,palette){
-  const bodySize=Math.max(settings.sizes.body||15,15),spacing=Math.round((settings.paragraph.spacing||12)*11.25),line=lineTwips(bodySize,Math.max(1.5,settings.paragraph.lineHeight||1.65)),font=fontOptions(settings);
+  const bodySize=Math.max(settings.sizes.body||14,14),spacing=Math.round((settings.paragraph.spacing||12)*11.25),line=lineTwips(bodySize,Math.max(1.5,settings.paragraph.lineHeight||1.65)),font=fontOptions(settings);
   const text=block.content||'';
-  if(block.type==='title'){const style=settings.headings.h1;return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel.HEADING_1,alignment:D.AlignmentType[style.align.toUpperCase()],keepNext:true,spacing:{before:0,after:Math.round(spacing*1.2),line:lineTwips(bodySize+12,1.25)},run:{bold:style.bold,color:palette.ink,size:pxToHalfPoints((settings.sizes.h1||32)+8),font:{...font,eastAsia:style.font||settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})]}
+  if(block.type==='title'){const style=settings.headings.h1;return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel.HEADING_1,alignment:D.AlignmentType[style.align.toUpperCase()],keepNext:true,spacing:{before:0,after:Math.round(spacing*1.2),line:lineTwips(bodySize+10,1.25)},run:{bold:true,color:palette.ink,size:pxToHalfPoints((settings.sizes.h1||26)+5),font:{...font,eastAsia:style.font||settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})]}
   if(block.type==='heading'){
-    const level=Math.min(Math.max(block.level||1,1),3),levelStyle=settings.headings[`h${level}`],size=settings.sizes[`h${level}`]||({1:32,2:24,3:19})[level];
+    const level=Math.min(Math.max(block.level||1,1),3),levelStyle=settings.headings[`h${level}`],size=settings.sizes[`h${level}`]||({1:26,2:20,3:16})[level];
     return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel[`HEADING_${level}`],alignment:D.AlignmentType[levelStyle.align.toUpperCase()],keepNext:true,spacing:{before:Math.round(levelStyle.before*15),after:Math.round(levelStyle.after*15),line:lineTwips(size,1.28)},run:{bold:levelStyle.bold,color:palette.ink,size:pxToHalfPoints(size),font:{...font,eastAsia:levelStyle.font||settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})];
   }
   if(block.type==='intro')return [paragraph(D,text,settings,palette,{spacing:{after:Math.round(spacing*1.5),line:lineTwips(bodySize,1.8)},run:{color:palette.muted,size:pxToHalfPoints(bodySize)}})];
@@ -556,9 +587,9 @@ function blockParagraphs(block,D,settings,palette){
   if(block.type==='orderedList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${formatListNumber(index,settings.list.numbering,block.numbers?.[index])} `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
   if(block.type==='choiceList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${String.fromCharCode(65+index)}. `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
   if(block.type==='blockquote')return block.content.split('\n').map(lineText=>paragraph(D,lineText,settings,palette,{indent:{left:360,right:180},border:{left:{color:palette.accent,space:8,style:'single',size:16}},shading:{fill:palette.pale},spacing:{before:45,after:110,line},keepLines:true}));
-  if(block.type==='flowDiagram')return [paragraph(D,block.steps.map((step,index)=>`${index?'   →   ':''}${step}`).join(''),settings,palette,{alignment:D.AlignmentType.CENTER,shading:{fill:palette.pale},spacing:{before:120,after:160,line:lineTwips(bodySize+2,1.5)},keepLines:true,run:{bold:true,color:palette.ink}})];
+  if(block.type==='flowDiagram'||block.type==='operatorSequence')return [paragraph(D,block.steps.map((step,index)=>`${index?`   ${block.connectors?.[index-1]||'→'}   `:''}${step}`).join(''),settings,palette,{alignment:D.AlignmentType.CENTER,shading:{fill:palette.pale},spacing:{before:120,after:160,line:lineTwips(bodySize+2,1.5)},keepLines:true,run:{bold:true,color:palette.ink}})];
   if(block.type==='codeBlock'){
-    const codeFont=settings.fonts.code||'Consolas',codeRuns=block.content.split('\n').map((lineText,index)=>new D.TextRun({text:lineText||' ',...(index?{break:1}:{}),font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||12,12)),color:'F0F3F8'}));
+    const codeFont=settings.fonts.code||'Consolas',codeRuns=block.content.split('\n').map((lineText,index)=>new D.TextRun({text:lineText||' ',...(index?{break:1}:{}),font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||11,11)),color:'111111'}));
     return [new D.Paragraph({style:'CodeBlock',children:codeRuns,shading:{fill:palette.code},indent:{left:190,right:190},spacing:{before:140,after:190,line:300},keepLines:true})];
   }
   if(block.type==='mathBlock')return [new D.Paragraph({children:makeRuns(text,D,settings,palette,{font:{ascii:'Cambria Math',hAnsi:'Cambria Math',eastAsia:settings.fonts.body||'Microsoft YaHei'}}),alignment:D.AlignmentType.CENTER,spacing:{before:120,after:150,line},shading:{fill:palette.pale}})];
@@ -566,7 +597,7 @@ function blockParagraphs(block,D,settings,palette){
   return [];
 }
 function buildDocx(doc,settings,D){
-  const palette=PALETTES[settings.theme]||PALETTES.clean,children=[];
+  const palette=DOCX_PALETTE,children=[];
   for(const block of doc.blocks){
     if(block.type==='table'){
       const headers=block.header||[],borders={top:{style:'single',size:4,color:palette.line},bottom:{style:'single',size:4,color:palette.line},left:{style:'single',size:4,color:palette.line},right:{style:'single',size:4,color:palette.line},insideHorizontal:{style:'single',size:3,color:palette.line},insideVertical:{style:'single',size:3,color:palette.line}};
@@ -576,11 +607,11 @@ function buildDocx(doc,settings,D){
     }
     children.push(...blockParagraphs(block,D,settings,palette));
   }
-  const font=fontOptions(settings),bodySize=pxToHalfPoints(Math.max(settings.sizes.body||15,15)),{page,margin}=pageDimensions(settings),codeFont=settings.fonts.code||'Consolas';
+  const font=fontOptions(settings),bodySize=pxToHalfPoints(Math.max(settings.sizes.body||14,14)),{page,margin}=pageDimensions(settings),codeFont=settings.fonts.code||'Consolas';
   return new D.Document({
     styles:{
       default:{document:{run:{font,language:{value:'en-US',eastAsia:'zh-CN'},size:bodySize,color:palette.ink},paragraph:{spacing:{after:180,line:420}}}},
-      paragraphStyles:[{id:'CodeBlock',name:'Code Block',basedOn:'Normal',next:'Normal',paragraph:{shading:{fill:palette.code},indent:{left:190,right:190},spacing:{before:140,after:190,line:300},keepLines:true},run:{font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||12,12)),color:'F0F3F8'}}]
+      paragraphStyles:[{id:'CodeBlock',name:'Code Block',basedOn:'Normal',next:'Normal',paragraph:{shading:{fill:palette.code},indent:{left:190,right:190},spacing:{before:140,after:190,line:300},keepLines:true},run:{font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||11,11)),color:'111111'}}]
     },
     sections:[{properties:{page:{size:page,margin:{top:margin,right:margin,bottom:margin,left:margin}}},children}],
     numbering:{config:[{reference:'unordered',levels:[{level:0,format:'bullet',text:'•',alignment:'left',style:{paragraph:{indent:{left:440,hanging:220}},run:{font:'Arial'}}}]}]}
@@ -617,10 +648,175 @@ async function docx(doc,settings,name){
   if(!window.docx)await load('./vendor/docx.umd.js');
   if(!window.docx)throw new Error('Word 导出组件加载失败');
   const localSettings={...settings,fonts:{...settings.fonts}};
+  localSettings.sizes={...settings.sizes,body:Math.min(settings.sizes.body||15,14),h1:Math.min(settings.sizes.h1||29,26),h2:Math.min(settings.sizes.h2||22,20),h3:Math.min(settings.sizes.h3||18,16),code:Math.min(settings.sizes.code||12,11)};
   if(/Mac|iPhone|iPad/i.test(navigator.platform)&&localSettings.fonts.body==='Microsoft YaHei')localSettings.fonts.body='PingFang SC';
   if(/Mac|iPhone|iPad/i.test(navigator.platform)&&localSettings.fonts.heading==='Microsoft YaHei')localSettings.fonts.heading=localSettings.fonts.body;
   const file=buildDocx(await inlineImagesAsData(doc),localSettings,window.docx);
   return await window.docx.Packer.toBlob(file);
+}
+
+const inlineText = value => String(value || '').replace(/\s+/g, ' ').trim();
+
+function inlineHtml(node) {
+  if (node.nodeType === Node.TEXT_NODE) return (node.nodeValue || '').replace(/\s+/g, ' ');
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  const tag = node.tagName.toLowerCase();
+  if (tag === 'br') return '\n';
+  if (tag === 'img') return node.getAttribute('alt') ? `[图片：${inlineText(node.getAttribute('alt'))}]` : '[图片]';
+  if (['script', 'style', 'noscript', 'svg'].includes(tag)) return '';
+  const content = [...node.childNodes].map(inlineHtml).join('');
+  if (tag === 'strong' || tag === 'b') return `**${content.trim()}**`;
+  if (tag === 'em' || tag === 'i') return `*${content.trim()}*`;
+  if (tag === 'del' || tag === 's' || tag === 'strike') return `~~${content.trim()}~~`;
+  if (tag === 'code' && node.parentElement?.tagName !== 'PRE') return `\`${content.trim()}\``;
+  if (tag === 'sup') return `^${content.trim()}^`;
+  if (tag === 'sub') return `~${content.trim()}~`;
+  if (tag === 'a') {
+    const href = node.getAttribute('href') || '';
+    return href ? `[${content.trim()}](${href})` : content;
+  }
+  return content;
+}
+
+function listMarkdown(list, depth = 0) {
+  const ordered = list.tagName.toLowerCase() === 'ol';
+  const start = Math.max(1, Number(list.getAttribute('start')) || 1);
+  const lines = [];
+  [...list.children].filter(child => child.tagName?.toLowerCase() === 'li').forEach((item, index) => {
+    const nested = [...item.children].filter(child => ['ul', 'ol'].includes(child.tagName?.toLowerCase()));
+    const content = [...item.childNodes].filter(child => !nested.includes(child)).map(inlineHtml).join('').trim();
+    const marker = ordered ? `${start + index}.` : '-';
+    lines.push(`${'  '.repeat(depth)}${marker} ${content}`.trimEnd());
+    nested.forEach(listNode => lines.push(listMarkdown(listNode, depth + 1)));
+  });
+  return lines.join('\n');
+}
+
+function tableMarkdown(table) {
+  const rows = [...table.querySelectorAll('tr')].map(row => [...row.children]
+    .filter(cell => ['th', 'td'].includes(cell.tagName.toLowerCase()))
+    .map(cell => [...cell.childNodes].map(inlineHtml).join('').replace(/\|/g, '\\|').trim()));
+  if (!rows.length || !rows[0].length) return '';
+  const width = Math.max(...rows.map(row => row.length));
+  const normalized = rows.map(row => Array.from({ length: width }, (_, index) => row[index] || ''));
+  return `| ${normalized[0].join(' | ')} |\n| ${normalized[0].map(() => '---').join(' | ')} |${normalized.slice(1).map(row => `\n| ${row.join(' | ')} |`).join('')}`;
+}
+
+function htmlToMarkdown(html) {
+  const parsed = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  const render = node => {
+    if (node.nodeType === Node.TEXT_NODE) return inlineText(node.nodeValue);
+    if (node.nodeType !== Node.ELEMENT_NODE) return '';
+    const tag = node.tagName.toLowerCase();
+    if (['script', 'style', 'noscript', 'svg'].includes(tag)) return '';
+    if (/^h[1-6]$/.test(tag)) return `${'#'.repeat(Number(tag[1]))} ${[...node.childNodes].map(inlineHtml).join('').trim()}`;
+    if (tag === 'p') return [...node.childNodes].map(inlineHtml).join('').trim();
+    if (tag === 'ul' || tag === 'ol') return listMarkdown(node);
+    if (tag === 'pre') {
+      const code = node.querySelector('code') || node;
+      const language = [...code.classList].find(name => name.startsWith('language-'))?.slice(9) || '';
+      return `\`\`\`${language}\n${code.textContent.replace(/\n+$/, '')}\n\`\`\``;
+    }
+    if (tag === 'blockquote') return [...node.childNodes].map(render).filter(Boolean).join('\n').split('\n').map(line => `> ${line}`).join('\n');
+    if (tag === 'table') return tableMarkdown(node);
+    if (tag === 'hr') return '---';
+    return [...node.childNodes].map(render).filter(Boolean).join('\n');
+  };
+  return [...parsed.body.children].map(render).filter(Boolean).join('\n\n').trim();
+}
+
+function decodeText(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const encodings = bytes[0] === 0xff && bytes[1] === 0xfe ? ['utf-16le']
+    : bytes[0] === 0xfe && bytes[1] === 0xff ? ['utf-16be'] : ['utf-8', 'gb18030'];
+  for (const encoding of encodings) {
+    try { return new TextDecoder(encoding, { fatal: true }).decode(buffer).replace(/^\uFEFF/, ''); }
+    catch {}
+  }
+  throw new Error('文本编码无法识别');
+}
+
+let mammothPromise;
+async function getMammoth() {
+  if (window.mammoth) return window.mammoth;
+  if (!mammothPromise) mammothPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = './vendor/mammoth.browser.min.js';
+    script.onload = () => window.mammoth ? resolve(window.mammoth) : reject(new Error('Word 读取组件加载失败'));
+    script.onerror = () => reject(new Error('Word 读取组件加载失败'));
+    document.head.append(script);
+  });
+  return mammothPromise;
+}
+
+let pdfPromise;
+async function getPdfJs() {
+  if (!pdfPromise) pdfPromise = import('./vendor/pdfjs/pdf.min.mjs').then(pdfjs => {
+    pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.min.mjs', document.baseURI).href;
+    return pdfjs;
+  });
+  return pdfPromise;
+}
+
+async function extractPdf(file) {
+  const pdfjs = await getPdfJs();
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  if (pdf.numPages > 300) throw new Error('页数超过 300 页，已跳过以避免浏览器卡顿');
+  const pages = [];
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    const page = await pdf.getPage(pageNumber);
+    const items = (await page.getTextContent()).items.filter(item => typeof item.str === 'string' && item.str.trim());
+    if (!items.length) continue;
+    const lines = [];
+    let currentY = null, currentLine = [];
+    for (const item of items) {
+      const y = Math.round(item.transform?.[5] || 0);
+      if (currentY !== null && Math.abs(y - currentY) > 3) {
+        lines.push(currentLine.sort((a, b) => (a.transform?.[4] || 0) - (b.transform?.[4] || 0)).map(value => value.str).join(' ').replace(/\s+/g, ' ').trim());
+        currentLine = [];
+      }
+      currentY = y;
+      currentLine.push(item);
+      if (item.hasEOL) {
+        lines.push(currentLine.sort((a, b) => (a.transform?.[4] || 0) - (b.transform?.[4] || 0)).map(value => value.str).join(' ').replace(/\s+/g, ' ').trim());
+        currentLine = []; currentY = null;
+      }
+    }
+    if (currentLine.length) lines.push(currentLine.sort((a, b) => (a.transform?.[4] || 0) - (b.transform?.[4] || 0)).map(value => value.str).join(' ').replace(/\s+/g, ' ').trim());
+    const text = lines.filter(Boolean).join('\n');
+    if (text) pages.push(text);
+  }
+  if (!pages.length) throw new Error('没有提取到文字，可能是扫描版 PDF 或图片文件');
+  return pages.join('\n\n');
+}
+
+async function readImportedFile(file) {
+  const name = String(file?.name || '文件'), extension = name.split('.').at(-1)?.toLowerCase() || '';
+  if (file.size > 12 * 1024 * 1024) throw new Error('文件超过 12 MB，已跳过');
+  if (['txt', 'md', 'markdown'].includes(extension)) return decodeText(await file.arrayBuffer());
+  if (['html', 'htm'].includes(extension)) return htmlToMarkdown(decodeText(await file.arrayBuffer()));
+  if (extension === 'docx') {
+    const mammoth = await getMammoth();
+    const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() }, { includeDefaultStyleMap: true });
+    const text = htmlToMarkdown(result.value);
+    if (!text) throw new Error('Word 文档没有可读取的正文');
+    return text;
+  }
+  if (extension === 'pdf') return extractPdf(file);
+  if (extension === 'rtf') return convertRtf(decodeText(await file.arrayBuffer()));
+  if (extension === 'doc') throw new Error('旧版 .doc 格式暂不支持，请另存为 .docx');
+  throw new Error('不支持此文件格式');
+}
+
+function convertRtf(source) {
+  let text = String(source).replace(/\\'[0-9a-f]{2}/gi, value => String.fromCharCode(parseInt(value.slice(2), 16)));
+  text = text.replace(/\\u(-?\d+)\??/g, (_, raw) => String.fromCharCode((Number(raw) + 65536) % 65536));
+  text = text.replace(/\\(?:par[d]?|line)\b\s?/g, '\n').replace(/\\tab\b\s?/g, '\t').replace(/\\([\\{}])/g, '$1').replace(/\\~/g, ' ');
+  text = text.replace(/\\(?:fonttbl|colortbl|stylesheet|info|pict|object)\b/g, '');
+  text = text.replace(/\\[a-zA-Z]+-?\d* ?/g, '').replace(/[{}]/g, '').replace(/\r/g, '');
+  const cleaned = text.split('\n').map(line => line.replace(/[ \t]+/g, ' ').trim()).filter(Boolean).join('\n\n').trim();
+  if (!cleaned) throw new Error('RTF 文件没有可读取的正文');
+  return cleaned;
 }
 
 const out={markdown,png,pdf,docx,saveAs};
@@ -635,7 +831,7 @@ const exportDialog=$('#export-dialog'), exportName=$('#export-name'), exportForm
 const settingsAction=document.createElement('button');settingsAction.id='preview-settings';settingsAction.className='close-preview';settingsAction.textContent='样式与页面';$('.preview-controls').prepend(settingsAction);
 const exportAction=$('#export-menu'), exportHome=exportAction.parentElement;
 const save=()=>{try{localStorage.setItem('text-to-md-v2',JSON.stringify({text:content.value,doc,settings,fileName,sourceDirty}))}catch{status.textContent='浏览器禁用了本地保存；当前页面仍可正常使用'}};
-function notify(message){toast.textContent=message;toast.hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>toast.hidden=true,2600)}
+function notify(message,duration=2600){toast.textContent=message;toast.hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>toast.hidden=true,duration)}
 function setStatus(message){status.textContent=message}
 window.addEventListener('error',event=>{if(event.message)setStatus(`页面脚本错误：${event.message}`)});
 window.addEventListener('unhandledrejection',event=>{const reason=event.reason?.message||'未知错误';setStatus(`操作未完成：${reason}`)});
@@ -701,7 +897,11 @@ function serializePreview(){
     if(tag==='p')return text;
     if(tag==='blockquote')return text.split('\n').map(line=>`> ${line}`).join('\n');
     if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>{const body=[...item.childNodes].filter(child=>!(child.nodeType===Node.ELEMENT_NODE&&child.classList.contains('list-marker'))).map(inlineMarkdown).join('').trim();return `${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${body}`}).join('\n');
-    if(node.classList.contains('flow-diagram'))return [...node.querySelectorAll('.flow-step')].map(step=>step.textContent.trim()).join(' → ');
+    if(node.classList.contains('flow-diagram')){
+      const steps=[...node.querySelectorAll('.flow-step')].map(step=>step.textContent.trim());
+      const operators=[...node.querySelectorAll('.flow-operator')].map(operator=>operator.textContent.trim());
+      return steps.map((step,index)=>`${index?` ${operators[index-1]||'→'} `:''}${step}`).join('');
+    }
     if(tag==='pre')return `\`\`\`${node.dataset.language||''}\n${node.textContent}\n\`\`\``;
     if(tag==='hr')return '---';
     if(tag==='table'){
@@ -774,7 +974,22 @@ $('#confirm-export').onclick=async event=>{
 let parseTimer;
 content.addEventListener('input',()=>{sourceDirty=true;updateCount();setStatus('正在识别文档结构…');clearTimeout(parseTimer);parseTimer=setTimeout(()=>{doc=parse(content.value);if(previewPane.classList.contains('visible')){render();enhancePreview()}setStatus('文本结构已更新，可打开预览检查')},220)});
 preview.addEventListener('input',()=>{if(history.at(-1)!==preview.innerHTML){history.push(preview.innerHTML);if(history.length>40)history.shift();future=[]}syncPreview()});
-$('#file-input').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>5*1024*1024)return notify('文件超过 5MB，请拆分后导入。');try{content.value=await file.text();fileName=file.name.replace(/\.[^.]+$/,'');sourceDirty=true;updateCount();format()}catch{notify('文件读取失败，请确认编码后重试。')}};
+$('#file-input').onchange=async event=>{
+  const files=[...event.target.files];if(!files.length)return;
+  if(content.value.trim()&&!confirm(`导入会替换当前输入内容。\n已选 ${files.length} 个文件，是否继续？`)){event.target.value='';return}
+  const imported=[],skipped=[];
+  setStatus(`正在读取 ${files.length} 个文件…`);
+  for(const file of files){
+    try{const text=(await readImportedFile(file)).trim();if(!text)throw new Error('文件内容为空');imported.push({name:file.name,text})}
+    catch(error){skipped.push(`${file.name}：${error.message||'读取失败'}`)}
+  }
+  event.target.value='';
+  if(!imported.length){setStatus('没有可导入的文件');notify(`未能导入文件。${skipped.slice(0,3).join('；')}`,7000);return}
+  content.value=imported.length===1?imported[0].text:imported.map(item=>`# ${item.name.replace(/\.[^.]+$/,'')}\n\n${item.text}`).join('\n\n---\n\n');
+  fileName=imported.length===1?imported[0].name.replace(/\.[^.]+$/,''):'导入文档';sourceDirty=true;updateCount();format();
+  const summary=`成功导入 ${imported.length} 个${skipped.length?`，跳过 ${skipped.length} 个`:'文件'}${skipped.length?`：${skipped.slice(0,3).join('；')}${skipped.length>3?'；…':''}`:''}`;
+  setStatus(summary);notify(summary,skipped.length?8000:3500);
+};
 document.querySelectorAll('.format-toolbar [data-command]').forEach(button=>button.onclick=()=>{preview.focus();document.execCommand(button.dataset.command,false,null)});
 document.querySelectorAll('.format-toolbar [data-block]').forEach(button=>button.onclick=()=>{preview.focus();document.execCommand('formatBlock',false,button.dataset.block)});
 $('[data-divider]').onclick=()=>{preview.focus();document.execCommand('insertHorizontalRule')};

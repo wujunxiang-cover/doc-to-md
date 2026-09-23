@@ -13,7 +13,7 @@ const exportDialog=$('#export-dialog'), exportName=$('#export-name'), exportForm
 const settingsAction=document.createElement('button');settingsAction.id='preview-settings';settingsAction.className='close-preview';settingsAction.textContent='样式与页面';$('.preview-controls').prepend(settingsAction);
 const exportAction=$('#export-menu'), exportHome=exportAction.parentElement;
 const save=()=>{try{localStorage.setItem('text-to-md-v2',JSON.stringify({text:content.value,doc,settings,fileName,sourceDirty}))}catch{status.textContent='浏览器禁用了本地保存；当前页面仍可正常使用'}};
-function notify(message){toast.textContent=message;toast.hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>toast.hidden=true,2600)}
+function notify(message,duration=2600){toast.textContent=message;toast.hidden=false;clearTimeout(notify.timer);notify.timer=setTimeout(()=>toast.hidden=true,duration)}
 function setStatus(message){status.textContent=message}
 window.addEventListener('error',event=>{if(event.message)setStatus(`页面脚本错误：${event.message}`)});
 window.addEventListener('unhandledrejection',event=>{const reason=event.reason?.message||'未知错误';setStatus(`操作未完成：${reason}`)});
@@ -79,7 +79,11 @@ function serializePreview(){
     if(tag==='p')return text;
     if(tag==='blockquote')return text.split('\n').map(line=>`> ${line}`).join('\n');
     if(tag==='ul'||tag==='ol')return [...node.children].map((item,index)=>{const body=[...item.childNodes].filter(child=>!(child.nodeType===Node.ELEMENT_NODE&&child.classList.contains('list-marker'))).map(inlineMarkdown).join('').trim();return `${tag==='ul'?'-':node.classList.contains('choice-list')?`${String.fromCharCode(65+index)}.`:`${index+1}.`} ${body}`}).join('\n');
-    if(node.classList.contains('flow-diagram'))return [...node.querySelectorAll('.flow-step')].map(step=>step.textContent.trim()).join(' → ');
+    if(node.classList.contains('flow-diagram')){
+      const steps=[...node.querySelectorAll('.flow-step')].map(step=>step.textContent.trim());
+      const operators=[...node.querySelectorAll('.flow-operator')].map(operator=>operator.textContent.trim());
+      return steps.map((step,index)=>`${index?` ${operators[index-1]||'→'} `:''}${step}`).join('');
+    }
     if(tag==='pre')return `\`\`\`${node.dataset.language||''}\n${node.textContent}\n\`\`\``;
     if(tag==='hr')return '---';
     if(tag==='table'){
@@ -152,7 +156,22 @@ $('#confirm-export').onclick=async event=>{
 let parseTimer;
 content.addEventListener('input',()=>{sourceDirty=true;updateCount();setStatus('正在识别文档结构…');clearTimeout(parseTimer);parseTimer=setTimeout(()=>{doc=parse(content.value);if(previewPane.classList.contains('visible')){render();enhancePreview()}setStatus('文本结构已更新，可打开预览检查')},220)});
 preview.addEventListener('input',()=>{if(history.at(-1)!==preview.innerHTML){history.push(preview.innerHTML);if(history.length>40)history.shift();future=[]}syncPreview()});
-$('#file-input').onchange=async event=>{const file=event.target.files[0];if(!file)return;if(file.size>5*1024*1024)return notify('文件超过 5MB，请拆分后导入。');try{content.value=await file.text();fileName=file.name.replace(/\.[^.]+$/,'');sourceDirty=true;updateCount();format()}catch{notify('文件读取失败，请确认编码后重试。')}};
+$('#file-input').onchange=async event=>{
+  const files=[...event.target.files];if(!files.length)return;
+  if(content.value.trim()&&!confirm(`导入会替换当前输入内容。\n已选 ${files.length} 个文件，是否继续？`)){event.target.value='';return}
+  const imported=[],skipped=[];
+  setStatus(`正在读取 ${files.length} 个文件…`);
+  for(const file of files){
+    try{const text=(await readImportedFile(file)).trim();if(!text)throw new Error('文件内容为空');imported.push({name:file.name,text})}
+    catch(error){skipped.push(`${file.name}：${error.message||'读取失败'}`)}
+  }
+  event.target.value='';
+  if(!imported.length){setStatus('没有可导入的文件');notify(`未能导入文件。${skipped.slice(0,3).join('；')}`,7000);return}
+  content.value=imported.length===1?imported[0].text:imported.map(item=>`# ${item.name.replace(/\.[^.]+$/,'')}\n\n${item.text}`).join('\n\n---\n\n');
+  fileName=imported.length===1?imported[0].name.replace(/\.[^.]+$/,''):'导入文档';sourceDirty=true;updateCount();format();
+  const summary=`成功导入 ${imported.length} 个${skipped.length?`，跳过 ${skipped.length} 个`:'文件'}${skipped.length?`：${skipped.slice(0,3).join('；')}${skipped.length>3?'；…':''}`:''}`;
+  setStatus(summary);notify(summary,skipped.length?8000:3500);
+};
 document.querySelectorAll('.format-toolbar [data-command]').forEach(button=>button.onclick=()=>{preview.focus();document.execCommand(button.dataset.command,false,null)});
 document.querySelectorAll('.format-toolbar [data-block]').forEach(button=>button.onclick=()=>{preview.focus();document.execCommand('formatBlock',false,button.dataset.block)});
 $('[data-divider]').onclick=()=>{preview.focus();document.execCommand('insertHorizontalRule')};

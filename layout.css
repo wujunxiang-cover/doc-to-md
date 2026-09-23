@@ -112,3 +112,6 @@ button:disabled{opacity:.56;cursor:wait;transform:none}
 .document .flow-diagram{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:9px;margin:0 0 var(--paragraph-space);padding:15px 16px;border:1px solid #dfe6ef;border-radius:10px;background:linear-gradient(135deg,#f8faff,#f3f7fb);text-align:center}
 .document .flow-step{display:inline-flex;align-items:center;min-height:34px;padding:6px 12px;border:1px solid #d8e1ed;border-radius:8px;background:#fff;color:#2d3b52;font-weight:650}
 .document .flow-arrow{color:var(--blue);font-size:18px;font-weight:750}
+.document .flow-operator{color:var(--blue);font-size:18px;font-weight:750;padding:0 2px}
+.document .relation-diagram{background:linear-gradient(135deg,#f7f8fb,#f2f4f8);border-color:#e1e5ec}
+.document .relation-diagram .flow-step{border-radius:6px;background:#fff;font-weight:600}
