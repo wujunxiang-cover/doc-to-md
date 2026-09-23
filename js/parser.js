@@ -1,4 +1,4 @@
-import { emptyDocument } from './model.js';
+import { emptyDocument, formatListNumber } from './model.js';
 import { detectHeading, isNumberedQuestion } from './structure.mjs';
 
 const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -173,7 +173,7 @@ export function toMarkdown(doc) {
   }).join('\n\n')+'\n';
 }
 
-export function blockHtml(b) {
+export function blockHtml(b, settings={}) {
   if(b.type==='title') return `<h1 class="document-title">${inline(b.content)}</h1>`;
   if(b.type==='intro') return `<p class="document-intro">${inline(b.content).replace(/\n/g,'<br>')}</p>`;
   if(b.type==='heading') return `<h${b.level}${b.category?` class="section-heading section-${esc(b.category)}"`:''}>${inline(b.content)}</h${b.level}>`;
@@ -182,7 +182,7 @@ export function blockHtml(b) {
   if(b.type==='answerNote') return `<p class="answer-note">${inline(b.content)}</p>`;
   if(b.type==='paragraph') return `<p>${inline(b.content).replace(/\n/g,'<br>')}</p>`;
   if(b.type==='bulletList') return '<ul class="explicit-list">'+b.items.map(x=>`<li><span class="list-marker bullet-marker" contenteditable="false">•</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ul>';
-  if(b.type==='orderedList') return '<ol class="explicit-list">'+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${esc(b.numbers?.[index]||`${index+1}.`)}</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
+  if(b.type==='orderedList') return '<ol class="explicit-list">'+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${esc(formatListNumber(index,settings.list?.numbering,b.numbers?.[index]))}</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
   if(b.type==='choiceList') return `<ol class="choice-list explicit-list choice-${esc(b.kind||'choice')}">`+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${String.fromCharCode(65+index)}.</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
   if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
   if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;

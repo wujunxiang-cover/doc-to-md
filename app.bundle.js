@@ -26,18 +26,29 @@ const defaults = {
   theme:'clean', pageMode:'continuous',
   fonts:{body:'Microsoft YaHei',heading:'Microsoft YaHei',latin:'Arial',code:'Menlo'},
   sizes:{body:16,h1:32,h2:24,h3:19,code:13},
-  paragraph:{lineHeight:1.7,spacing:16,firstLineIndent:0,letterSpacing:0},
+  paragraph:{lineHeight:1.7,spacing:16,before:0,firstLineIndent:0,letterSpacing:0},
   headings:{
-    h1:{bold:true,align:'left',before:28,after:14},
-    h2:{bold:true,align:'left',before:22,after:11},
-    h3:{bold:true,align:'left',before:17,after:9}
+    h1:{font:'',bold:true,align:'left',before:28,after:14},
+    h2:{font:'',bold:true,align:'left',before:22,after:11},
+    h3:{font:'',bold:true,align:'left',before:17,after:9}
   },
-  list:{indent:28,spacing:6},
+  list:{indent:28,spacing:6,numbering:'source'},
   page:{size:'A4',orientation:'portrait',margin:'normal'}
 };
 const themes={clean:'简洁文档',business:'商务报告',academic:'学术论文',study:'学习笔记',report:'正式报告',modern:'现代文档',official:'中文公文',notion:'Notion 风格',github:'GitHub 风格'};
 function emptyDocument(){return {blocks:[]};}
 function clone(value){return JSON.parse(JSON.stringify(value));}
+function alphabetic(index,uppercase=false){let value='',number=index+1;while(number){number--;value=String.fromCharCode((uppercase?65:97)+(number%26))+value;number=Math.floor(number/26)}return value}
+function roman(index){let number=index+1;if(number>3999)return String(number);let value='';for(const [amount,symbol] of [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']])while(number>=amount){value+=symbol;number-=amount}return value}
+function formatListNumber(index,style='source',sourceNumber=''){
+  if(style==='source'&&sourceNumber)return sourceNumber;
+  if(style==='decimal-paren')return `(${index+1})`;
+  if(style==='lower-alpha')return `${alphabetic(index)}.`;
+  if(style==='upper-alpha')return `${alphabetic(index,true)}.`;
+  if(style==='lower-roman')return `${roman(index).toLowerCase()}.`;
+  if(style==='upper-roman')return `${roman(index)}.`;
+  return `${index+1}.`;
+}
 
 const sentenceEnd = /[。！？!?；;]$/;
 function normalizeMarker(text) {
@@ -277,7 +288,7 @@ function toMarkdown(doc) {
   }).join('\n\n')+'\n';
 }
 
-function blockHtml(b) {
+function blockHtml(b, settings={}) {
   if(b.type==='title') return `<h1 class="document-title">${inline(b.content)}</h1>`;
   if(b.type==='intro') return `<p class="document-intro">${inline(b.content).replace(/\n/g,'<br>')}</p>`;
   if(b.type==='heading') return `<h${b.level}${b.category?` class="section-heading section-${esc(b.category)}"`:''}>${inline(b.content)}</h${b.level}>`;
@@ -286,7 +297,7 @@ function blockHtml(b) {
   if(b.type==='answerNote') return `<p class="answer-note">${inline(b.content)}</p>`;
   if(b.type==='paragraph') return `<p>${inline(b.content).replace(/\n/g,'<br>')}</p>`;
   if(b.type==='bulletList') return '<ul class="explicit-list">'+b.items.map(x=>`<li><span class="list-marker bullet-marker" contenteditable="false">•</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ul>';
-  if(b.type==='orderedList') return '<ol class="explicit-list">'+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${esc(b.numbers?.[index]||`${index+1}.`)}</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
+  if(b.type==='orderedList') return '<ol class="explicit-list">'+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${esc(formatListNumber(index,settings.list?.numbering,b.numbers?.[index]))}</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
   if(b.type==='choiceList') return `<ol class="choice-list explicit-list choice-${esc(b.kind||'choice')}">`+b.items.map((x,index)=>`<li><span class="list-marker" contenteditable="false">${String.fromCharCode(65+index)}.</span><span class="list-content">${inline(x)}</span></li>`).join('')+'</ol>';
   if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
   if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
@@ -381,7 +392,7 @@ function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.m
   const add=(value,options={})=>{
     const lines=String(value).split('\n');
     lines.forEach((line,index)=>{
-      const runFont=/[\u3000-\u9fff\uf900-\ufaff]/.test(line)&&!options.font?{...font,ascii:font.eastAsia,hAnsi:font.eastAsia}:font;
+      const baseFont=options.font||normal.font||font,runFont=/[\u3000-\u9fff\uf900-\ufaff]/.test(line)?{...baseFont,ascii:baseFont.eastAsia||baseFont.ascii,hAnsi:baseFont.eastAsia||baseFont.hAnsi}:baseFont;
       result.push(new D.TextRun({text:line||' ',...(index?{break:1}:{}),...normal,font:runFont,...options}));
     });
   };
@@ -433,13 +444,13 @@ function pageDimensions(settings){
 function blockParagraphs(block,D,settings,palette){
   const bodySize=Math.max(settings.sizes.body||16,17),spacing=Math.round((settings.paragraph.spacing||16)*11.25),line=lineTwips(bodySize,Math.max(1.55,settings.paragraph.lineHeight||1.7)),font=fontOptions(settings);
   const text=block.content||'';
-  if(block.type==='title'){const style=settings.headings.h1;return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel.HEADING_1,alignment:D.AlignmentType[style.align.toUpperCase()],keepNext:true,spacing:{before:0,after:Math.round(spacing*1.2),line:lineTwips(bodySize+12,1.25)},run:{bold:style.bold,color:palette.ink,size:pxToHalfPoints((settings.sizes.h1||32)+8),font:{...font,eastAsia:settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})]}
+  if(block.type==='title'){const style=settings.headings.h1;return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel.HEADING_1,alignment:D.AlignmentType[style.align.toUpperCase()],keepNext:true,spacing:{before:0,after:Math.round(spacing*1.2),line:lineTwips(bodySize+12,1.25)},run:{bold:style.bold,color:palette.ink,size:pxToHalfPoints((settings.sizes.h1||32)+8),font:{...font,eastAsia:style.font||settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})]}
   if(block.type==='heading'){
     const level=Math.min(Math.max(block.level||1,1),3),levelStyle=settings.headings[`h${level}`],size=settings.sizes[`h${level}`]||({1:32,2:24,3:19})[level];
-    return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel[`HEADING_${level}`],alignment:D.AlignmentType[levelStyle.align.toUpperCase()],keepNext:true,spacing:{before:Math.round(levelStyle.before*15),after:Math.round(levelStyle.after*15),line:lineTwips(size,1.28)},run:{bold:levelStyle.bold,color:palette.ink,size:pxToHalfPoints(size),font:{...font,eastAsia:settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})];
+    return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel[`HEADING_${level}`],alignment:D.AlignmentType[levelStyle.align.toUpperCase()],keepNext:true,spacing:{before:Math.round(levelStyle.before*15),after:Math.round(levelStyle.after*15),line:lineTwips(size,1.28)},run:{bold:levelStyle.bold,color:palette.ink,size:pxToHalfPoints(size),font:{...font,eastAsia:levelStyle.font||settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})];
   }
   if(block.type==='intro')return [paragraph(D,text,settings,palette,{spacing:{after:Math.round(spacing*1.5),line:lineTwips(bodySize,1.8)},run:{color:palette.muted,size:pxToHalfPoints(bodySize)}})];
-  if(block.type==='paragraph')return [paragraph(D,text,settings,palette,{alignment:D.AlignmentType.LEFT,indent:settings.paragraph.firstLineIndent?{firstLine:Math.round(settings.paragraph.firstLineIndent*bodySize*15)}:undefined,spacing:{after:spacing,line},keepLines:true})];
+  if(block.type==='paragraph')return [paragraph(D,text,settings,palette,{alignment:D.AlignmentType.LEFT,indent:settings.paragraph.firstLineIndent?{firstLine:Math.round(settings.paragraph.firstLineIndent*bodySize*15)}:undefined,spacing:{before:Math.round((settings.paragraph.before||0)*11.25),after:spacing,line},keepLines:true})];
   if(block.type==='question'||block.type==='answerItem'){
     const number=block.number||'';
     const marker=new D.TextRun({text:`${number} `,font,size:pxToHalfPoints(bodySize),bold:true,color:block.type==='answerItem'?palette.accent:palette.ink});
@@ -448,7 +459,7 @@ function blockParagraphs(block,D,settings,palette){
   if(block.type==='answerNote')return [paragraph(D,text,settings,palette,{spacing:{before:100,after:140,line},run:{color:palette.muted}})];
   const listIndent=Math.round(settings.list.indent*15),listSpacing=Math.round(settings.list.spacing*11.25);
   if(block.type==='bulletList')return block.items.map(item=>new D.Paragraph({children:makeRuns(item,D,settings,palette),bullet:{level:0},indent:{left:listIndent,hanging:Math.min(listIndent,240)},keepLines:true,spacing:{after:listSpacing,line}}));
-  if(block.type==='orderedList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${block.numbers?.[index]||`${index+1}.`} `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
+  if(block.type==='orderedList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${formatListNumber(index,settings.list.numbering,block.numbers?.[index])} `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
   if(block.type==='choiceList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${String.fromCharCode(65+index)}. `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
   if(block.type==='blockquote')return block.content.split('\n').map(lineText=>paragraph(D,lineText,settings,palette,{indent:{left:360,right:180},border:{left:{color:palette.accent,space:8,style:'single',size:16}},shading:{fill:palette.pale},spacing:{before:45,after:110,line},keepLines:true}));
   if(block.type==='codeBlock'){
@@ -538,11 +549,13 @@ function applySettings(){
   const root=document.documentElement.style;
   root.setProperty('--body-font',`"${settings.fonts.body}","PingFang SC",sans-serif`);
   root.setProperty('--heading-font',`"${settings.fonts.heading}","PingFang SC",sans-serif`);
+  for(const level of ['h1','h2','h3'])root.setProperty(`--${level}-font`,`"${settings.headings[level].font||settings.fonts.heading}","PingFang SC",sans-serif`);
   root.setProperty('--code-font',`${settings.fonts.code},monospace`);
   for(const [key,value] of Object.entries(settings.sizes)) root.setProperty(`--${key==='body'?'body-size':key+'-size'}`,value+'px');
   root.setProperty('--line-height',settings.paragraph.lineHeight);root.setProperty('--paragraph-space',settings.paragraph.spacing+'px');
   root.setProperty('--letter-spacing',`${settings.paragraph.letterSpacing||0}px`);
   root.setProperty('--first-line-indent',`${settings.paragraph.firstLineIndent||0}em`);
+  root.setProperty('--paragraph-before',`${settings.paragraph.before||0}px`);
   root.setProperty('--list-indent',`${settings.list.indent}px`);root.setProperty('--list-item-space',`${settings.list.spacing}px`);
   for(const level of ['h1','h2','h3']){const style=settings.headings[level];root.setProperty(`--${level}-weight`,style.bold?'750':'500');root.setProperty(`--${level}-align`,style.align);root.setProperty(`--${level}-before`,`${style.before}px`);root.setProperty(`--${level}-after`,`${style.after}px`)}
   root.setProperty('--content-padding',({narrow:'38px',normal:'57px',wide:'76px'})[settings.page.margin]||'57px');
@@ -553,7 +566,7 @@ function applySettings(){
   const templateName=$('#template-name'),pageName=$('#page-name');if(templateName)templateName.textContent=themes[settings.theme];if(pageName)pageName.textContent=`${settings.page.size} · ${settings.page.orientation==='portrait'?'纵向':'横向'}`;save();
 }
 function render(){
-  preview.innerHTML=doc.blocks.length?doc.blocks.map(blockHtml).join(''):'<p class="empty-preview">还没有内容，先在输入区添加一些文字。</p>';
+  preview.innerHTML=doc.blocks.length?doc.blocks.map(block=>blockHtml(block,settings)).join(''):'<p class="empty-preview">还没有内容，先在输入区添加一些文字。</p>';
   sourceDirty=false;history=[];future=[];push();applySettings();
 }
 async function enhancePreview(){
@@ -617,8 +630,15 @@ function panel(kind){
   }else{
     title.textContent='样式与排版';
     box.innerHTML=`<div class="setting-group"><h3>文档风格</h3><div class="template-list">${Object.entries(themes).map(([key,label])=>`<button class="${key===settings.theme?'active':''}" data-theme="${key}">${label}</button>`).join('')}</div></div><div class="setting-group"><h3>自定义风格</h3><div class="preset-list"><button id="save-custom-style">保存当前设置为风格</button><div id="custom-style-list"></div></div></div><div class="setting-group"><h3>字体</h3><div class="setting-grid"><label>正文<select data-set="fonts.body"><option>Microsoft YaHei</option><option>SimSun</option><option>SimHei</option><option>KaiTi</option><option>PingFang SC</option></select></label><label>标题<select data-set="fonts.heading"><option>Microsoft YaHei</option><option>SimHei</option><option>SimSun</option></select></label><label>英文<select data-set="fonts.latin"><option>Arial</option><option>Calibri</option><option>Times New Roman</option><option>Georgia</option></select></label><label>代码<select data-set="fonts.code"><option>Menlo</option><option>Consolas</option><option>Courier New</option><option>Monaco</option></select></label></div></div><div class="setting-group"><h3>字号与段落</h3><div class="setting-grid">${[['body','正文'],['h1','一级标题'],['h2','二级标题'],['h3','三级标题'],['code','代码']].map(([key,label])=>`<label>${label}<input type="number" min="10" max="56" data-set="sizes.${key}" value="${settings.sizes[key]}"></label>`).join('')}<label>行距<input type="number" step=".1" min="1" max="3" data-set="paragraph.lineHeight" value="${settings.paragraph.lineHeight}"></label><label>段后距<input type="number" min="0" max="48" data-set="paragraph.spacing" value="${settings.paragraph.spacing}"></label><label>首行缩进（字符）<input type="number" min="0" max="4" step=".5" data-set="paragraph.firstLineIndent" value="${settings.paragraph.firstLineIndent}"></label><label>字间距（px）<input type="number" min="-1" max="4" step=".1" data-set="paragraph.letterSpacing" value="${settings.paragraph.letterSpacing}"></label></div></div>${['h1','h2','h3'].map((level,index)=>{const label=['一级标题','二级标题','三级标题'][index],style=settings.headings[level];return `<div class="setting-group"><h3>${label}</h3><div class="setting-grid"><label><input type="checkbox" data-set="headings.${level}.bold" ${style.bold?'checked':''}> 加粗</label><label>对齐<select data-set="headings.${level}.align"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label><label>段前距（px）<input type="number" min="0" max="80" data-set="headings.${level}.before" value="${style.before}"></label><label>段后距（px）<input type="number" min="0" max="60" data-set="headings.${level}.after" value="${style.after}"></label></div></div>`}).join('')}<div class="setting-group"><h3>列表</h3><div class="setting-grid"><label>缩进（px）<input type="number" min="0" max="100" data-set="list.indent" value="${settings.list.indent}"></label><label>项目间距（px）<input type="number" min="0" max="32" data-set="list.spacing" value="${settings.list.spacing}"></label></div></div><div class="setting-group"><h3>页面</h3><div class="setting-grid"><label>纸张<select data-set="page.size"><option>A4</option><option>Letter</option></select></label><label>方向<select data-set="page.orientation"><option value="portrait">纵向</option><option value="landscape">横向</option></select></label><label>页边距<select data-set="page.margin"><option value="narrow">窄</option><option value="normal">标准</option><option value="wide">宽</option></select></label></div></div>`;
+    const paragraphGroup=[...box.querySelectorAll('.setting-group')].find(group=>group.querySelector('h3')?.textContent==='字号与段落');
+    paragraphGroup?.querySelector('.setting-grid')?.insertAdjacentHTML('beforeend',`<label>段前距（px）<input type="number" min="0" max="48" data-set="paragraph.before" value="${settings.paragraph.before}"></label>`);
+    const pageGroup=box.querySelector('.setting-group:last-child');
+    const typography=document.createElement('div');typography.className='setting-group';typography.innerHTML=`<h3>各级标题字体</h3><div class="setting-grid">${[['h1','一级标题'],['h2','二级标题'],['h3','三级标题']].map(([level,label])=>`<label>${label}<select data-set="headings.${level}.font"><option value="">沿用标题字体</option><option>Microsoft YaHei</option><option>SimHei</option><option>SimSun</option><option>KaiTi</option><option>PingFang SC</option></select></label>`).join('')}</div>`;
+    pageGroup?.before(typography);
+    const listGroup=[...box.querySelectorAll('.setting-group')].find(group=>group.querySelector('h3')?.textContent==='列表');
+    listGroup?.querySelector('.setting-grid')?.insertAdjacentHTML('beforeend',`<label>编号样式<select data-set="list.numbering"><option value="source">保留原编号</option><option value="decimal">1、2、3</option><option value="decimal-paren">(1)、(2)、(3)</option><option value="lower-alpha">a、b、c</option><option value="upper-alpha">A、B、C</option><option value="lower-roman">i、ii、iii</option><option value="upper-roman">I、II、III</option></select></label>`);
   }
-  box.querySelectorAll('[data-set]').forEach(el=>{const path=el.dataset.set.split('.');let target=settings;path.slice(0,-1).forEach(k=>target=target[k]);if(el.type==='checkbox')el.checked=target[path.at(-1)];else el.value=target[path.at(-1)];el.oninput=()=>{target[path.at(-1)]=el.type==='number'?Number(el.value):el.type==='checkbox'?el.checked:el.value;applySettings()}});
+  box.querySelectorAll('[data-set]').forEach(el=>{const path=el.dataset.set.split('.');let target=settings;path.slice(0,-1).forEach(k=>target=target[k]);if(el.type==='checkbox')el.checked=target[path.at(-1)];else el.value=target[path.at(-1)];el.oninput=()=>{target[path.at(-1)]=el.type==='number'?Number(el.value):el.type==='checkbox'?el.checked:el.value;if(path.join('.')==='list.numbering')render();else applySettings()}});
   box.querySelectorAll('[data-margin]').forEach(b=>b.onclick=()=>{settings.page.margin=b.dataset.margin;document.documentElement.style.setProperty('--content-padding',({narrow:'30px',normal:'48px',wide:'72px'})[b.dataset.margin]);applySettings()});
   box.querySelectorAll('[data-theme]').forEach(button=>button.onclick=()=>{
     settings.theme=button.dataset.theme;

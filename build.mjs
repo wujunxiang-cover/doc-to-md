@@ -8,8 +8,8 @@ const stripExports=source=>source.replace(/^export\s+/gm,'');
 
 const model=stripExports(await read('js/model.js'));
 const structure=stripExports(await read('js/structure.mjs'));
-const parser=stripExports((await read('js/parser.js')).replace(/^import \{ emptyDocument \} from '\.\/model\.js';\s*/m,'').replace(/^import \{ detectHeading, isNumberedQuestion \} from '\.\/structure\.mjs';\s*/m,''));
-const exporters=stripExports((await read('js/exporters.js')).replace(/^import \{ toMarkdown \} from '\.\/parser\.js';\s*/m,''));
+const parser=stripExports((await read('js/parser.js')).replace(/^import \{ emptyDocument, formatListNumber \} from '\.\/model\.js';\s*/m,'').replace(/^import \{ detectHeading, isNumberedQuestion \} from '\.\/structure\.mjs';\s*/m,''));
+const exporters=stripExports((await read('js/exporters.js')).replace(/^import \{ toMarkdown \} from '\.\/parser\.js';\s*/m,'').replace(/^import \{ formatListNumber \} from '\.\/model\.js';\s*/m,''));
 const app=(await read('web.js')).replace(/^import .*;\s*/gm,'');
 const vendorPaths=['markdown-it/dist/browser/markdown-it.umd.min.js','markdown-it-mark/dist/markdown-it-mark.min.js','markdown-it-sub/dist/markdown-it-sub.min.js','markdown-it-sup/dist/markdown-it-sup.min.js'];
 const vendor=(await Promise.all(vendorPaths.map(path=>readFile(join(root,'node_modules',path),'utf8')))).join('\n');
