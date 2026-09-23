@@ -100,7 +100,7 @@ document.querySelectorAll('[data-export]').forEach(button=>button.onclick=async(
     if(sourceDirty)format();
     const kind=button.dataset.export;setStatus('正在准备导出…');
     if(kind==='md')out.markdown(doc,fileName);
-    if(kind==='docx'){if(!previewPane.classList.contains('visible'))openPreview();await enhancePreview();await out.docx(doc,settings,fileName,preview)}
+    if(kind==='docx')await out.docx(doc,settings,fileName)
     if(kind==='pdf')out.pdf();
     if(kind==='png')await out.png(preview,fileName);
     setStatus('导出已准备完成');$('#export-popover').hidden=true
