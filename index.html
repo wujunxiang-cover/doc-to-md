@@ -1,33 +1,8 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="在线输入文本并导出 Markdown 文件" />
-  <title>Text to MD</title>
-  <link rel="stylesheet" href="web.css" />
-</head>
-<body>
-  <main class="page">
-    <header class="topbar">
-      <a class="logo" href="./"><span>↗</span> Text to MD</a>
-      <p>无需安装，浏览器本地导出 Markdown</p>
-    </header>
-    <section class="hero">
-      <p class="eyebrow">TEXT → MARKDOWN</p>
-      <h1>写下内容，带走 <em>.md</em></h1>
-      <p>支持直接输入或导入 TXT / Markdown。内容不会上传到服务器。</p>
-    </section>
-    <section class="editor-card" aria-label="Markdown 编辑器">
-      <div class="editor-toolbar">
-        <span id="file-label">未命名文本</span>
-        <div><input id="file-input" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" hidden /><button id="import" class="secondary" type="button">导入文件</button><button id="download" type="button">下载 .md</button></div>
-      </div>
-      <textarea id="content" placeholder="在这里输入或粘贴你的文本…" autofocus></textarea>
-      <div class="editor-footer"><span id="count">0 字符</span><span>⌘ / Ctrl + Enter 可下载</span></div>
-    </section>
-    <section class="tips"><div><b>01</b><h2>输入文本</h2><p>直接写作、粘贴内容，或导入已有文本文件。</p></div><div><b>02</b><h2>编辑 Markdown</h2><p>按 Markdown 语法加入标题、列表或链接。</p></div><div><b>03</b><h2>立即下载</h2><p>点击按钮，浏览器将生成 `.md` 文件。</p></div></section>
-  </main>
-  <script src="web.js"></script>
-</body>
-</html>
+<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="description" content="在浏览器本地完成自动排版、预览与多格式导出。"><title>Text to MD · 本地文档排版</title><link rel="stylesheet" href="web.css"></head><body>
+<main class="app-shell"><header class="app-header"><a class="brand" href="./"><span class="brand-icon">▤</span>Text to MD <small>V2</small></a><div class="header-actions"><span class="privacy"><i></i>本地处理</span><button id="auto-format" class="primary">✦ 自动排版</button><button id="export-menu">导出⌄</button><div id="export-popover" class="popover" hidden><button data-export="md"><b>Markdown</b><span>适合知识库与继续编辑</span></button><button data-export="docx"><b>Word (.docx)</b><span>适合办公与报告</span></button><button data-export="pdf"><b>PDF</b><span>打开浏览器打印为 PDF</span></button><button data-export="png"><b>PNG 长图</b><span>适合快速分享</span></button></div></div></header>
+<nav class="workspace-bar"><button id="template-button" class="tool-button">模板 <strong id="template-name">简洁文档</strong></button><button id="style-button" class="tool-button">排版设置</button><button id="page-button" class="tool-button">页面 <strong id="page-name">A4 · 纵向</strong></button><span class="bar-spacer"></span><button id="undo" class="icon-button" title="撤销">↶</button><button id="redo" class="icon-button" title="重做">↷</button><button id="clear-local" class="quiet-button">清空本地内容</button></nav>
+<section class="mobile-tabs"><button class="active" data-view="editor">编辑</button><button data-view="preview">预览</button></section>
+<section class="workspace"><section id="editor-pane" class="pane editor-pane"><div class="pane-title"><div><span>原始文本 / Markdown</span><small>粘贴内容后点击自动排版</small></div><label class="import-button"><input id="file-input" type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" hidden>导入 TXT / MD</label></div><textarea id="content" spellcheck="false" placeholder="在这里输入、粘贴文字或 Markdown…&#10;&#10;示例：&#10;一、项目简介&#10;这是正文内容。&#10;&#10;- 第一项&#10;- 第二项"></textarea></section>
+<section id="preview-pane" class="pane preview-pane"><div class="pane-title preview-title"><div><span>文档预览</span><small id="preview-mode-label">连续阅读 · 可直接修改</small></div><div class="preview-switch"><button class="active" data-page-mode="continuous">连续</button><button data-page-mode="page">页面</button></div></div><div class="format-toolbar"><button data-command="bold" title="加粗"><b>B</b></button><button data-command="italic" title="斜体"><i>I</i></button><button data-command="strikeThrough" title="删除线"><s>S</s></button><span></span><button data-block="h1">H1</button><button data-block="h2">H2</button><button data-block="h3">H3</button><button data-block="p">正文</button><span></span><button data-command="insertUnorderedList" title="无序列表">☷</button><button data-command="insertOrderedList" title="有序列表">☷₁</button><button data-block="blockquote" title="引用">❝</button><button data-block="pre" title="代码块">&lt;/&gt;</button><button data-divider title="分隔线">—</button><span></span><button data-command="justifyLeft">≡</button><button data-command="justifyCenter">≡</button></div><div id="page-stage" class="page-stage continuous"><article id="preview" class="document theme-clean" contenteditable="true"><p class="empty-preview">完成自动排版后，文档会在这里显示。你也可以直接编辑。</p></article></div></section></section>
+<footer class="statusbar"><span id="status">准备就绪</span><span id="count">0 字符</span><span id="page-info">本地自动保存已开启</span></footer></main>
+<aside id="settings-panel" class="settings-panel" hidden><div class="panel-header"><h2 id="panel-title">排版设置</h2><button id="close-panel" class="icon-button">×</button></div><div id="panel-content"></div></aside><dialog id="reformat-dialog"><form method="dialog"><h2>重新自动排版？</h2><p>预览区已有手动修改。重新排版将用左侧原始文本生成新文档。</p><menu><button value="cancel">取消</button><button id="confirm-reformat" value="reformat" class="primary">完全重新排版</button></menu></form></dialog><div id="toast" class="toast" role="status" hidden></div><script type="module" src="web.js"></script></body></html>
