@@ -9,7 +9,7 @@ export function pdf(){window.print();}
 const PALETTES={clean:{ink:'26354D',muted:'66748A',accent:'315BCB',pale:'F1F4FA',line:'D9E0EA',code:'20283A'},business:{ink:'26364A',muted:'64758A',accent:'245184',pale:'EFF4F9',line:'D6E0EA',code:'202A38'},academic:{ink:'302B2A',muted:'70625F',accent:'762F38',pale:'F7F1EF',line:'E5D8D5',code:'28252A'},notion:{ink:'292929',muted:'6B6B6B',accent:'3F3F3F',pale:'F3F3F3',line:'DDDDDD',code:'252525'},github:{ink:'24292F',muted:'656D76',accent:'0969DA',pale:'F6F8FA',line:'D0D7DE',code:'24292F'}};
 const greek={alpha:'α',beta:'β',gamma:'γ',delta:'δ',epsilon:'ε',theta:'θ',lambda:'λ',mu:'μ',pi:'π',rho:'ρ',sigma:'σ',tau:'τ',phi:'φ',omega:'ω',Gamma:'Γ',Delta:'Δ',Theta:'Θ',Lambda:'Λ',Pi:'Π',Sigma:'Σ',Phi:'Φ',Omega:'Ω'};
 const symbols={times:'×',cdot:'·',leq:'≤',le:'≤',geq:'≥',ge:'≥',neq:'≠',approx:'≈',equiv:'≡',pm:'±',infty:'∞',rightarrow:'→',to:'→',Rightarrow:'⇒',leftarrow:'←',sum:'∑',prod:'∏',partial:'∂',nabla:'∇'};
-const fontOptions=settings=>({ascii:settings.fonts.latin||'Arial',hAnsi:settings.fonts.latin||'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei',cs:settings.fonts.latin||'Arial'});
+const fontOptions=settings=>({ascii:settings.fonts.latin||'Arial',hAnsi:settings.fonts.latin||'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei',cs:settings.fonts.latin||'Arial',hint:'eastAsia'});
 const pxToHalfPoints=px=>Math.round(px*1.5);
 const lineTwips=(_px,leading=1.7)=>Math.round(240*leading);
 function mathSource(tex){
@@ -23,7 +23,10 @@ function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.m
   const result=[];
   const add=(value,options={})=>{
     const lines=String(value).split('\n');
-    lines.forEach((line,index)=>result.push(new D.TextRun({text:line||' ',...(index?{break:1}:{}),...normal,...options})));
+    lines.forEach((line,index)=>{
+      const runFont=/[\u3000-\u9fff\uf900-\ufaff]/.test(line)&&!options.font?{...font,ascii:font.eastAsia,hAnsi:font.eastAsia}:font;
+      result.push(new D.TextRun({text:line||' ',...(index?{break:1}:{}),...normal,font:runFont,...options}));
+    });
   };
   let last=0,match;
   while((match=tokens.exec(String(text)))){
