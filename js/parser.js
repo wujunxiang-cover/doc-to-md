@@ -1,7 +1,102 @@
 import { emptyDocument } from './model.js';
-const esc=s=>s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-export function inline(text){return esc(text).replace(/`([^`]+)`/g,'<code>$1</code>').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/~~([^~]+)~~/g,'<s>$1</s>').replace(/\*([^*]+)\*/g,'<em>$1</em>').replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>').replace(/\$([^$\n]+)\$/g,'<span class="math">$1</span>');}
-function isLikelyHeading(lines,i){const t=lines[i].trim();return t.length>0&&t.length<35&&i>0&&i<lines.length-1&&!lines[i-1].trim()&&!lines[i+1].trim()&&!/[。；，,：:]$/.test(t);}
-export function parse(text){const doc=emptyDocument(),lines=text.replace(/\r/g,'').split('\n');let i=0;while(i<lines.length){let line=lines[i],t=line.trim();if(!t){i++;continue}if(/^```/.test(t)){let lang=t.slice(3).trim(),code=[];i++;while(i<lines.length&&!/^```/.test(lines[i].trim()))code.push(lines[i++]);if(i<lines.length)i++;doc.blocks.push({type:'codeBlock',language:lang,content:code.join('\n')});continue}if(t==='$$'){let math=[];i++;while(i<lines.length&&lines[i].trim()!=='$$')math.push(lines[i++]);if(i<lines.length)i++;doc.blocks.push({type:'mathBlock',content:math.join('\n')});continue}let m=t.match(/^(#{1,3})\s+(.+)/);if(m){doc.blocks.push({type:'heading',level:m[1].length,content:m[2]});i++;continue}m=t.match(/^[一二三四五六七八九十]+、\s*(.+)/);if(m){doc.blocks.push({type:'heading',level:1,content:m[1]});i++;continue}m=t.match(/^(\d+[.、])\s*(.+)/);if(m&&i+1<lines.length&&/^\d+[.、]/.test(lines[i+1].trim())){let items=[];while(i<lines.length&&(m=lines[i].trim().match(/^\d+[.、]\s*(.+)/))){items.push(m[1]);i++}doc.blocks.push({type:'orderedList',items});continue}if(/^[-*+]\s+/.test(t)){let items=[];while(i<lines.length&&/^[-*+]\s+/.test(lines[i].trim())){items.push(lines[i].trim().replace(/^[-*+]\s+/,''));i++}doc.blocks.push({type:'bulletList',items});continue}if(/^>\s?/.test(t)){doc.blocks.push({type:'blockquote',content:t.replace(/^>\s?/) });i++;continue}if(/^([-*_])\1\1+$/.test(t)){doc.blocks.push({type:'divider'});i++;continue}if(t.includes('|')&&i+1<lines.length&&/^\s*\|?\s*:?-+/.test(lines[i+1])){let rows=[];const cells=s=>s.trim().replace(/^\||\|$/g,'').split('|').map(x=>x.trim());let header=cells(t);i+=2;while(i<lines.length&&lines[i].includes('|'))rows.push(cells(lines[i++]));doc.blocks.push({type:'table',header,rows});continue}if(isLikelyHeading(lines,i)){doc.blocks.push({type:'heading',level:2,content:t});i++;continue}let paragraph=[t];i++;while(i<lines.length&&lines[i].trim()&&!/^```|^\$\$|^#{1,3}\s|^[-*+]\s|^>\s|^\d+[.、]\s/.test(lines[i].trim()))paragraph.push(lines[i++].trim());doc.blocks.push({type:'paragraph',content:paragraph.join(' ')});}return doc;}
-export function toMarkdown(doc){return doc.blocks.map(b=>{if(b.type==='heading')return '#'.repeat(b.level)+' '+b.content;if(b.type==='paragraph')return b.content;if(b.type==='bulletList')return b.items.map(x=>'- '+x).join('\n');if(b.type==='orderedList')return b.items.map((x,i)=>`${i+1}. ${x}`).join('\n');if(b.type==='blockquote')return '> '+b.content;if(b.type==='codeBlock')return '```'+(b.language||'')+'\n'+b.content+'\n```';if(b.type==='mathBlock')return '$$\n'+b.content+'\n$$';if(b.type==='divider')return '---';if(b.type==='table')return '| '+b.header.join(' | ')+' |\n| '+b.header.map(()=>'---').join(' | ')+' |\n'+b.rows.map(r=>'| '+r.join(' | ')+' |').join('\n');return ''}).join('\n\n')+'\n';}
-export function blockHtml(b){if(b.type==='heading')return `<h${b.level}>${inline(b.content)}</h${b.level}>`;if(b.type==='paragraph')return `<p>${inline(b.content)}</p>`;if(b.type==='bulletList')return '<ul>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ul>';if(b.type==='orderedList')return '<ol>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';if(b.type==='blockquote')return `<blockquote>${inline(b.content)}</blockquote>`;if(b.type==='codeBlock')return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;if(b.type==='mathBlock')return `<div class="math-block">${esc(b.content)}</div>`;if(b.type==='divider')return '<hr>';if(b.type==='table')return '<table><thead><tr>'+b.header.map(x=>`<th>${inline(x)}</th>`).join('')+'</tr></thead><tbody>'+b.rows.map(r=>'<tr>'+r.map(x=>`<td>${inline(x)}</td>`).join('')+'</tr>').join('')+'</tbody></table>';return '';}
+
+const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl = value => /^(https?:|mailto:|\/|#)/i.test(value.trim()) ? value.trim() : '#';
+
+export function inline(text) {
+  const tokens = [];
+  const hold = html => `\u0000${tokens.push(html) - 1}\u0000`;
+  let value = esc(text);
+  value = value.replace(/`([^`]+)`/g, (_, code) => hold(`<code>${code}</code>`));
+  value = value.replace(/!\[([^\]]*)\]\(([^\s)]+)(?:\s+"([^"]*)")?\)/g, (_, alt, url, title='') => hold(`<img src="${esc(safeUrl(url))}" alt="${alt}" title="${title}">`));
+  value = value.replace(/\[([^\]]+)\]\(([^\s)]+)(?:\s+"([^"]*)")?\)/g, (_, label, url, title='') => hold(`<a href="${esc(safeUrl(url))}" title="${title}" target="_blank" rel="noopener">${label}</a>`));
+  value = value.replace(/(^|\s)(https?:\/\/[^\s<]+)/g, (_, lead, url) => `${lead}${hold(`<a href="${esc(safeUrl(url))}" target="_blank" rel="noopener">${url}</a>`)}`);
+  value = value.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => `<strong>${a ?? b}</strong>`)
+    .replace(/~~(.+?)~~/g, '<s>$1</s>').replace(/==(.+?)==/g, '<mark>$1</mark>')
+    .replace(/\^([^\^\n]+)\^/g, '<sup>$1</sup>').replace(/(?<!~)~([^~\n]+)~(?!~)/g, '<sub>$1</sub>')
+    .replace(/\$([^$\n]+)\$/g, '<span class="math">$1</span>')
+    .replace(/\*([^*\n]+)\*|_([^_\n]+)_/g, (_, a, b) => `<em>${a ?? b}</em>`);
+  return value.replace(/\u0000(\d+)\u0000/g, (_, i) => tokens[Number(i)]);
+}
+
+const divider = s => /^(?:[-*_]\s*){3,}$/.test(s) || /^(?:—|–|―|─|━){3,}$/.test(s);
+const listMatch = s => s.match(/^\s*(?:[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+)(.*)$/);
+const orderedMatch = s => s.match(/^\s*(?:\d+[.)、．]|[（(]\d+[）)]|[０-９]+[.、．]|[①-⑳])\s*(.*)$/);
+const tableCells = s => s.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(x => x.trim().replace(/\\\|/g, '|'));
+const isTableRule = s => s.includes('|') && tableCells(s).length > 0 && tableCells(s).every(x => /^:?-{3,}:?$/.test(x));
+const startsBlock = s => /^(?:```|~~~|\$\$|\\\[|#{1,6}\s|>\s?|[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+|\d+[.)、．]\s+|[（(]\d+[）)]|[一二三四五六七八九十]+[、.．])/.test(s) || divider(s);
+
+export function parse(text) {
+  const doc = emptyDocument(), lines = String(text).replace(/\r/g, '').split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const raw = lines[i], t = raw.trim();
+    if (!t) { i++; continue; }
+    let m;
+    if (/^(?:```|~~~)/.test(t)) {
+      const fence = t.slice(0, 3), language = t.slice(3).trim(), code = [];
+      i++; while (i < lines.length && !lines[i].trim().startsWith(fence)) code.push(lines[i++]); if (i < lines.length) i++;
+      doc.blocks.push({type:'codeBlock', language, content:code.join('\n')}); continue;
+    }
+    if (t === '$$' || t === '\\[') {
+      const end = t === '$$' ? '$$' : '\\]'; let math = []; i++;
+      while (i < lines.length && lines[i].trim() !== end) math.push(lines[i++]); if (i < lines.length) i++;
+      doc.blocks.push({type:'mathBlock', content:math.join('\n')}); continue;
+    }
+    if ((m = t.match(/^(#{1,6})\s+(.+?)\s*#*$/))) { doc.blocks.push({type:'heading', level:Math.min(m[1].length,3), content:m[2]}); i++; continue; }
+    if (i + 1 < lines.length && /^\s*(?:=+|-{3,})\s*$/.test(lines[i+1]) && t.length) {
+      doc.blocks.push({type:'heading', level:lines[i+1].trim()[0] === '=' ? 1 : 2, content:t}); i += 2; continue;
+    }
+    if ((m = t.match(/^(?:第[一二三四五六七八九十百零〇\d]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[（(][一二三四五六七八九十\d]+[）)]|\d+[、．])\s*(.+)$/))) {
+      doc.blocks.push({type:'heading', level:1, content:t}); i++; continue;
+    }
+    if (divider(t)) { doc.blocks.push({type:'divider'}); i++; continue; }
+    if (/^>/.test(t)) { const q=[]; while (i<lines.length && /^\s*>/.test(lines[i])) q.push(lines[i++].replace(/^\s*>\s?/,'')); doc.blocks.push({type:'blockquote',content:q.join('\n')}); continue; }
+    if (i+1<lines.length && t.includes('|') && isTableRule(lines[i+1])) {
+      const header=tableCells(t); i+=2; const rows=[];
+      while(i<lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(tableCells(lines[i++]));
+      doc.blocks.push({type:'table',header,rows}); continue;
+    }
+    if (listMatch(t)) {
+      const items=[]; while(i<lines.length && listMatch(lines[i].trim())) items.push(listMatch(lines[i++].trim())[1]);
+      doc.blocks.push({type:'bulletList',items}); continue;
+    }
+    if (orderedMatch(t)) {
+      const items=[]; while(i<lines.length && orderedMatch(lines[i].trim())) items.push(orderedMatch(lines[i++].trim())[1]);
+      doc.blocks.push({type:'orderedList',items}); continue;
+    }
+    if (/^\s{4,}\S/.test(raw)) { const code=[]; while(i<lines.length && (/^\s{4,}\S/.test(lines[i]) || !lines[i].trim())) code.push(lines[i++].replace(/^ {4}/,'')); doc.blocks.push({type:'codeBlock',language:'',content:code.join('\n').trimEnd()}); continue; }
+    const paragraph=[t]; i++;
+    while(i<lines.length && lines[i].trim() && !startsBlock(lines[i].trim()) && !(i+1<lines.length && /^(?:=+|-{3,})$/.test(lines[i+1].trim()))) paragraph.push(lines[i++].trim());
+    doc.blocks.push({type:'paragraph',content:paragraph.join('\n')});
+  }
+  return doc;
+}
+
+export function toMarkdown(doc) {
+  return doc.blocks.map(b=>{
+    if(b.type==='heading') return '#'.repeat(b.level)+' '+b.content;
+    if(b.type==='paragraph') return b.content;
+    if(b.type==='bulletList') return b.items.map(x=>'- '+x).join('\n');
+    if(b.type==='orderedList') return b.items.map((x,i)=>`${i+1}. ${x}`).join('\n');
+    if(b.type==='blockquote') return b.content.split('\n').map(x=>'> '+x).join('\n');
+    if(b.type==='codeBlock') return '```'+(b.language||'')+'\n'+b.content+'\n```';
+    if(b.type==='mathBlock') return '$$\n'+b.content+'\n$$';
+    if(b.type==='divider') return '---';
+    if(b.type==='table') return '| '+b.header.join(' | ')+' |\n| '+b.header.map(()=>'---').join(' | ')+' |\n'+b.rows.map(r=>'| '+r.join(' | ')+' |').join('\n');
+    return '';
+  }).join('\n\n')+'\n';
+}
+
+export function blockHtml(b) {
+  if(b.type==='heading') return `<h${b.level}>${inline(b.content)}</h${b.level}>`;
+  if(b.type==='paragraph') return `<p>${inline(b.content).replace(/\n/g,'<br>')}</p>`;
+  if(b.type==='bulletList') return '<ul>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ul>';
+  if(b.type==='orderedList') return '<ol>'+b.items.map(x=>`<li>${inline(x)}</li>`).join('')+'</ol>';
+  if(b.type==='blockquote') return `<blockquote>${inline(b.content).replace(/\n/g,'<br>')}</blockquote>`;
+  if(b.type==='codeBlock') return `<pre data-language="${esc(b.language||'')}"><code>${esc(b.content)}</code></pre>`;
+  if(b.type==='mathBlock') return `<div class="math-block">${esc(b.content)}</div>`;
+  if(b.type==='divider') return '<hr>';
+  if(b.type==='table') return '<table><thead><tr>'+b.header.map(x=>`<th>${inline(x)}</th>`).join('')+'</tr></thead><tbody>'+b.rows.map(r=>'<tr>'+b.header.map((_,i)=>`<td>${inline(r[i]||'')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
+  return '';
+}
