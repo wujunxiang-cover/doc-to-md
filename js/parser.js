@@ -1,4 +1,5 @@
 import { emptyDocument } from './model.js';
+import { detectHeading, isNumberedQuestion } from './structure.mjs';
 
 const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const markdownParser = new window.markdownit({html:false,linkify:true,breaks:false,typographer:false})
@@ -27,9 +28,9 @@ export function inline(text) {
 
 const divider = s => /^(?:[-*_]\s*){3,}$/.test(s) || /^(?:—|–|―|─|━){3,}$/.test(s);
 const listMatch = s => s.match(/^\s*(?:[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+)(.*)$/);
-const orderedMatch = s => s.match(/^\s*(?:\d+[.)、．]|[（(]\d+[）)]|[０-９]+[.、．]|[①-⑳])\s*(.*)$/);
+const orderedMatch = s => s.match(/^\s*(?:\d+[.)、．）]|[（(]\d+[）)]|[０-９]+[.、．）]|[①-⑳])\s*(.*)$/);
 const orderedInfo = s => {
-  const match = s.match(/^\s*((?:\d+[.)、．]|[（(]\d+[）)]|[０-９]+[.、．]|[①-⑳])\s*)(.*)$/);
+  const match = s.match(/^\s*((?:\d+(?:\.\d+){0,2}[.)、．）]?|[（(]\d+[）)]|[０-９]+[.、．）]|[①-⑳]|Q\s*\d+|题目\s*\d+|第[一二三四五六七八九十百零〇\d]+题)[：:]?\s*)(.*)$/i);
   return match ? {number:match[1].trim(),content:match[2].trim()} : null;
 };
 const tableCells = s => s.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(x => x.trim().replace(/\\\|/g, '|'));
@@ -62,7 +63,7 @@ function choiceParts(text) {
   });
   return {prefix, items};
 }
-const startsBlock = s => /^(?:```|~~~|\$\$|\\\[|#{1,6}\s|>\s?|[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+|\d+[.)、．]\s+|[（(]\d+[）)]|[一二三四五六七八九十]+[、.．])/.test(s) || divider(s);
+const startsBlock = s => /^(?:```|~~~|\$\$|\\\[|#{1,6}\s|>\s?|[-+*•·●○▪▫☑✓□]\s+|\[[ xX]\]\s+|\d+(?:\.\d+){0,2}[.)、．）]?\s+|[０-９]+[.、．）]\s*|[（(]\d+[）)]|[①-⑳]|[【〔〖\[]\s*\d+\s*[】〕〗\]]|Q\s*\d+|题目\s*\d+|第[一二三四五六七八九十百零〇\d]+题|[一二三四五六七八九十]+[、.．])/.test(s) || divider(s);
 
 export function parse(text) {
   const doc = emptyDocument(), lines = String(text).replace(/\r/g, '').split('\n');
@@ -93,9 +94,10 @@ export function parse(text) {
     if ((m=t.match(/^(?:参考答案|答案解析|标准答案|选择题|单选题|多选题|判断题|正误题|填空题|简答题|问答题|代码题|编程题|计算题|综合题)(?:\s*（[^）]*）)?[：:]?$/))) {
       const kind=sectionKind(t);doc.blocks.push({type:'heading',level:1,content:t,category:kind||undefined});activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;
     }
-    if ((m = t.match(/^(?:第[一二三四五六七八九十百零〇\d]+[章节篇部]|[一二三四五六七八九十]+[、.．]|[（(][一二三四五六七八九十\d]+[）)]|\d+[、．])\s*(.+)$/))) {
-      const kind=sectionKind(t);doc.blocks.push({type:'heading', level:1, content:t,category:kind||undefined}); activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++; continue;
-    }
+    const nextNonEmpty=lines.slice(i+1).find(line=>line.trim())||'';
+    const questionContext=Boolean(activeQuestionKind||choiceLine(nextNonEmpty)||choiceParts(orderedInfo(t)?.content||''));
+    const detectedHeading=detectHeading(t,{previousLine:lines[i-1]||'',nextLine:lines[i+1]||'',blankBefore:i===0||!lines[i-1]?.trim(),blankAfter:i===lines.length-1||!lines[i+1]?.trim(),previousIsHeading:['title','heading'].includes(doc.blocks.at(-1)?.type),questionSection:questionContext});
+    if(detectedHeading){const kind=sectionKind(t);doc.blocks.push({type:'heading',level:detectedHeading.level,content:t,category:kind||undefined});activeQuestionKind=kind;if(kind==='answers')inAnswerSection=true;else if(kind&&!inAnswerSection)inAnswerSection=false;i++;continue;}
     if(t.length<=32&&/[：:]$/.test(t)&&!/^\s*(?:答案|正确答案|答案解析|参考答案|标准答案)[：:]?$/.test(t)) { doc.blocks.push({type:'heading',level:2,content:t}); i++; continue; }
     if (!doc.blocks.length && isQuestionTitle(t)) { doc.blocks.push({type:'title',content:t}); i++; continue; }
     if (divider(t)) { doc.blocks.push({type:'divider'}); i++; continue; }
@@ -110,7 +112,7 @@ export function parse(text) {
       doc.blocks.push({type:'bulletList',items}); continue;
     }
     const numbered=orderedInfo(t);
-    if (numbered && (activeQuestionKind || choiceParts(numbered.content) || (()=>{let j=i+1;while(j<lines.length&&!lines[j].trim())j++;return j<lines.length&&choiceLine(lines[j]);})())) {
+    if (numbered && (activeQuestionKind || isNumberedQuestion(t) || choiceParts(numbered.content) || (()=>{let j=i+1;while(j<lines.length&&!lines[j].trim())j++;return j<lines.length&&choiceLine(lines[j]);})())) {
       const kind=activeQuestionKind||'choice', choices=choiceParts(numbered.content);
       if(inAnswerSection||kind==='answers') doc.blocks.push({type:'answerItem',number:numbered.number,content:numbered.content});
       else doc.blocks.push({type:'question',number:numbered.number,content:choices?choices.prefix:numbered.content,kind});

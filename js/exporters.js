@@ -1,17 +1,78 @@
 import { toMarkdown } from './parser.js';
 
-const download=(blob,name)=>{const u=URL.createObjectURL(blob),a=Object.assign(document.createElement('a'),{href:u,download:name});a.click();setTimeout(()=>URL.revokeObjectURL(u),300);};
 const load=src=>new Promise((resolve,reject)=>{if(document.querySelector(`script[src="${src}"]`))return resolve();const s=document.createElement('script');s.src=src;s.onload=resolve;s.onerror=()=>reject(new Error('本地导出组件加载失败'));document.head.append(s);});
-export function markdown(doc,name){download(new Blob([toMarkdown(doc)],{type:'text/markdown;charset=utf-8'}),`${name}.md`);}
-export async function png(node,name){if(!window.html2canvas)await load('./vendor/html2canvas.min.js');const canvas=await window.html2canvas(node,{scale:2,backgroundColor:'#ffffff',useCORS:true});canvas.toBlob(b=>download(b,`${name}.png`),'image/png');}
-export function pdf(){window.print();}
+export function markdown(doc){return new Blob([toMarkdown(doc)],{type:'text/markdown;charset=utf-8'});}
+export async function saveAs(blob,name,directory){
+  if(directory){const handle=await directory.getFileHandle(name,{create:true}),writer=await handle.createWritable();await writer.write(blob);await writer.close();return 'folder'}
+  const url=URL.createObjectURL(blob),anchor=Object.assign(document.createElement('a'),{href:url,download:name});document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);return 'download';
+}
+const canvasBlob=canvas=>new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('图片生成失败')), 'image/png'));
+export async function png(node,name,settings){
+  if(!window.html2canvas)await load('./vendor/html2canvas.min.js');
+  if(!window.JSZip)await load('./vendor/jszip.min.js');
+  const letter=settings.page.size==='Letter',landscape=settings.page.orientation==='landscape';
+  const page=letter?{width:816,height:1056}:{width:794,height:1123};
+  if(landscape)[page.width,page.height]=[page.height,page.width];
+  const margin={narrow:38,normal:57,wide:76}[settings.page.margin]||57;
+  const staging=document.createElement('div');staging.style.cssText=`position:fixed;left:-12000px;top:0;width:${page.width}px;z-index:-1;background:#fff;`;
+  const clone=node.cloneNode(true);clone.style.cssText+=`width:${page.width}px;max-width:none;min-height:0;margin:0;padding:${margin}px;box-shadow:none;border-radius:0;box-sizing:border-box;background:#fff;`;
+  clone.querySelectorAll('h1,h2,h3,li,pre,blockquote,table,tr').forEach(el=>el.style.breakInside='avoid');
+  staging.append(clone);document.body.append(staging);
+  try{
+    await Promise.all([...clone.querySelectorAll('img')].map(async img=>{
+      await img.decode?.().catch(()=>{});
+      const source=new URL(img.src,location.href);
+      if(!source.protocol.startsWith('data:')&&source.origin!==location.origin){try{const response=await fetch(source.href,{mode:'cors'});if(!response.ok)throw new Error()}catch{throw new Error(`图片“${img.alt||source.hostname}”不允许跨域读取，无法生成 PNG。请下载图片后重新导入。`)}}
+    }));
+    const height=clone.scrollHeight,usableHeight=page.height-2*margin,cloneTop=clone.getBoundingClientRect().top;
+    const lineBreaks=element=>{
+      if(element.matches('table'))return [...element.querySelectorAll('tr')].map(row=>row.getBoundingClientRect().bottom-cloneTop);
+      if(element.matches('ul,ol'))return [...element.querySelectorAll(':scope > li')].map(item=>item.getBoundingClientRect().bottom-cloneTop);
+      const range=document.createRange();range.selectNodeContents(element);
+      return [...new Set([...range.getClientRects()].map(rect=>Math.round(rect.bottom-cloneTop)))].sort((a,b)=>a-b);
+    };
+    const pages=[];let start=margin,end=start+usableHeight;
+    for(const block of [...clone.children]){
+      const top=block.getBoundingClientRect().top-cloneTop,bottom=block.getBoundingClientRect().bottom-cloneTop;
+      if(bottom<=end)continue;
+      if(top>start){pages.push({start,end:top});start=top;end=start+usableHeight;if(bottom<=end)continue;}
+      const boundaries=lineBreaks(block).filter(value=>value>start&&value<bottom);
+      while(bottom>end){
+        let cut=boundaries.filter(value=>value<=end).at(-1);
+        if(!cut)cut=boundaries.find(value=>value>start);
+        if(!cut)cut=Math.min(end,bottom);
+        pages.push({start,end:cut});start=cut;end=start+usableHeight;
+      }
+    }
+    const lastBottom=Math.max(margin,...[...clone.children].map(block=>block.getBoundingClientRect().bottom-cloneTop));
+    if(lastBottom>start)pages.push({start,end:lastBottom});if(!pages.length)pages.push({start:margin,end:Math.min(height-margin,margin+usableHeight)});
+    const zip=new window.JSZip();
+    for(let index=0;index<pages.length;index++){
+      const {start:top,end:bottom}=pages[index],content=await window.html2canvas(clone,{scale:2,backgroundColor:'#ffffff',useCORS:true,allowTaint:false,logging:false,width:page.width,height:Math.max(1,bottom-top),y:top,windowWidth:page.width,windowHeight:height,scrollX:0,scrollY:0});
+      const pageCanvas=document.createElement('canvas');pageCanvas.width=page.width*2;pageCanvas.height=page.height*2;
+      const context=pageCanvas.getContext('2d');context.fillStyle='#ffffff';context.fillRect(0,0,pageCanvas.width,pageCanvas.height);context.drawImage(content,0,margin*2);
+      zip.file(`${name}-${String(index+1).padStart(2,'0')}.png`,await canvasBlob(pageCanvas));
+    }
+    return await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:4}});
+  }catch(error){
+    if(/taint|cross-origin|insecure/i.test(String(error)))throw new Error('图片包含无法读取的跨域资源，请先下载图片后重新导入，或移除该图片再导出。');
+    throw error;
+  }finally{staging.remove()}
+}
+export function pdf(name,settings){
+  let style=document.getElementById('export-page-style');if(!style){style=document.createElement('style');style.id='export-page-style';document.head.append(style)}
+  const margin={narrow:'8mm',normal:'12mm',wide:'18mm'}[settings.page.margin]||'12mm';
+  style.textContent=`@page{size:${settings.page.size} ${settings.page.orientation};margin:${margin}}@media print{.document,.page-stage.page .document{padding:0!important;width:auto!important;max-width:none!important;min-height:0!important}.page-stage,.page-stage.continuous{overflow:visible!important}.document h1,.document h2,.document h3{break-after:avoid}.document p,.document li{orphans:2;widows:2}}`;
+  const oldTitle=document.title;document.title=name;window.print();setTimeout(()=>{document.title=oldTitle},1500);
+}
 
-const PALETTES={clean:{ink:'26354D',muted:'66748A',accent:'315BCB',pale:'F1F4FA',line:'D9E0EA',code:'20283A'},business:{ink:'26364A',muted:'64758A',accent:'245184',pale:'EFF4F9',line:'D6E0EA',code:'202A38'},academic:{ink:'302B2A',muted:'70625F',accent:'762F38',pale:'F7F1EF',line:'E5D8D5',code:'28252A'},notion:{ink:'292929',muted:'6B6B6B',accent:'3F3F3F',pale:'F3F3F3',line:'DDDDDD',code:'252525'},github:{ink:'24292F',muted:'656D76',accent:'0969DA',pale:'F6F8FA',line:'D0D7DE',code:'24292F'}};
+const PALETTES={clean:{ink:'26354D',muted:'66748A',accent:'315BCB',pale:'F1F4FA',line:'D9E0EA',code:'20283A'},business:{ink:'26364A',muted:'64758A',accent:'245184',pale:'EFF4F9',line:'D6E0EA',code:'202A38'},academic:{ink:'302B2A',muted:'70625F',accent:'762F38',pale:'F7F1EF',line:'E5D8D5',code:'28252A'},study:{ink:'283A32',muted:'66776E',accent:'47765E',pale:'EFF5F0',line:'D8E3DB',code:'26352D'},report:{ink:'26364A',muted:'64758A',accent:'245184',pale:'EFF4F9',line:'D6E0EA',code:'202A38'},modern:{ink:'292929',muted:'6B6B6B',accent:'3F3F3F',pale:'F3F3F3',line:'DDDDDD',code:'252525'},official:{ink:'222222',muted:'555555',accent:'9A2C2C',pale:'F5EFEF',line:'DDCECE',code:'282525'},notion:{ink:'292929',muted:'6B6B6B',accent:'3F3F3F',pale:'F3F3F3',line:'DDDDDD',code:'252525'},github:{ink:'24292F',muted:'656D76',accent:'0969DA',pale:'F6F8FA',line:'D0D7DE',code:'24292F'}};
 const greek={alpha:'α',beta:'β',gamma:'γ',delta:'δ',epsilon:'ε',theta:'θ',lambda:'λ',mu:'μ',pi:'π',rho:'ρ',sigma:'σ',tau:'τ',phi:'φ',omega:'ω',Gamma:'Γ',Delta:'Δ',Theta:'Θ',Lambda:'Λ',Pi:'Π',Sigma:'Σ',Phi:'Φ',Omega:'Ω'};
 const symbols={times:'×',cdot:'·',leq:'≤',le:'≤',geq:'≥',ge:'≥',neq:'≠',approx:'≈',equiv:'≡',pm:'±',infty:'∞',rightarrow:'→',to:'→',Rightarrow:'⇒',leftarrow:'←',sum:'∑',prod:'∏',partial:'∂',nabla:'∇'};
 const fontOptions=settings=>({ascii:settings.fonts.latin||'Arial',hAnsi:settings.fonts.latin||'Arial',eastAsia:settings.fonts.body||'Microsoft YaHei',cs:settings.fonts.latin||'Arial',hint:'eastAsia'});
 const pxToHalfPoints=px=>Math.round(px*1.5);
 const lineTwips=(_px,leading=1.7)=>Math.round(240*leading);
+const imageDimensions=new Map();
 function mathSource(tex){
   let source=String(tex).replace(/\\(?:mathrm|text|mathbf|operatorname|mathit|mathsf)\{([^{}]*)\}/g,'$1').replace(/\\(?:left|right)\s*/g,'');
   source=source.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g,'$1⁄$2').replace(/\\sqrt\{([^{}]+)\}/g,'√$1');
@@ -19,7 +80,7 @@ function mathSource(tex){
 }
 function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.max(settings.sizes.body||16,17))){
   const font=fontOptions(settings),normal={font,language:{value:'en-US',eastAsia:'zh-CN'},size:bodySize,color:palette.ink,...base};
-  const tokens=/\\\([\s\S]+?\\\)|\$(?!\$)[^$\n]+\$|`[^`\n]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|~~[\s\S]+?~~|==[\s\S]+?==|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_)|\^[^^\n]+\^|(?<!~)~[^~\n]+~(?!~)|\[[^\]]+\]\([^)]+\)/g;
+  const tokens=/!\[[^\]]*\]\([^)]+\)|\\\([\s\S]+?\\\)|\$(?!\$)[^$\n]+\$|`[^`\n]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|~~[\s\S]+?~~|==[\s\S]+?==|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_)|\^[^^\n]+\^|(?<!~)~[^~\n]+~(?!~)|\[[^\]]+\]\([^)]+\)/g;
   const result=[];
   const add=(value,options={})=>{
     const lines=String(value).split('\n');
@@ -32,7 +93,15 @@ function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.m
   while((match=tokens.exec(String(text)))){
     add(String(text).slice(last,match.index));
     const token=match[0];
-    if(token.startsWith('\\(')){addMath(token.slice(2,-2))}
+    if(token.startsWith('![')){
+      const image=token.match(/^!\[([^\]]*)\]\(([^)]+)\)$/),uri=image?.[2]||'';
+      if(uri.startsWith('data:image/')){
+        const [metadata,data]=uri.split(',',2),bytes=metadata.includes(';base64')?Uint8Array.from(atob(data),character=>character.charCodeAt(0)):new TextEncoder().encode(decodeURIComponent(data));
+        const [naturalWidth,naturalHeight]=imageDimensions.get(uri)||[420,280],scale=Math.min(1,500/naturalWidth,650/naturalHeight);
+        result.push(new D.ImageRun({data:bytes,transformation:{width:Math.round(naturalWidth*scale),height:Math.round(naturalHeight*scale)},altText:{title:image[1],description:image[1],name:image[1]}}));
+      }else add(image?.[1]?`[图片：${image[1]}]`:'[图片]');
+    }
+    else if(token.startsWith('\\(')){addMath(token.slice(2,-2))}
     else if(token.startsWith('$')){addMath(token.slice(1,-1))}
     else if(token.startsWith('`'))add(token.slice(1,-1),{font:{ascii:settings.fonts.code||'Consolas',hAnsi:settings.fonts.code||'Consolas',eastAsia:settings.fonts.code||'Consolas'},size:pxToHalfPoints(settings.sizes.code||13),shading:{fill:palette.pale}});
     else if(token.startsWith('**')||token.startsWith('__'))add(token.slice(2,-2),{bold:true});
@@ -114,12 +183,39 @@ function buildDocx(doc,settings,D){
     numbering:{config:[{reference:'unordered',levels:[{level:0,format:'bullet',text:'•',alignment:'left',style:{paragraph:{indent:{left:440,hanging:220}},run:{font:'Arial'}}}]}]}
   });
 }
+async function inlineImagesAsData(doc){
+  const copy=JSON.parse(JSON.stringify(doc)),pattern=/!\[([^\]]*)\]\(([^)]+)\)/g;
+  async function normalizeImage(source,alt){
+    const image=new Image();image.src=source;try{await image.decode()}catch{throw new Error(`图片“${alt||'未命名图片'}”无法解码。`)}
+    const width=image.naturalWidth,height=image.naturalHeight;if(!width||!height)throw new Error(`图片“${alt||'未命名图片'}”尺寸无效。`);
+    const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;canvas.getContext('2d').drawImage(image,0,0);
+    const data=canvas.toDataURL('image/png');imageDimensions.set(data,[width,height]);return data;
+  }
+  async function convert(value){
+    let text=String(value);
+    for(const match of [...text.matchAll(pattern)]){
+      const [,alt,url]=match;if(url.startsWith('data:image/')){const data=await normalizeImage(url,alt);text=text.replace(match[0],`![${alt}](${data})`);continue;}
+      let response;try{response=await fetch(url)}catch{throw new Error(`图片“${alt||url}”无法读取；请确认图片链接可访问且允许跨域读取。`)}
+      if(!response.ok)throw new Error(`图片“${alt||url}”读取失败（${response.status}）。`);
+      const blob=await response.blob();if(!blob.type.startsWith('image/'))throw new Error(`“${alt||url}”不是可识别的图片文件。`);
+      const source=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('图片读取失败'));reader.readAsDataURL(blob)}),data=await normalizeImage(source,alt);
+      text=text.replace(match[0],`![${alt}](${data})`);
+    }
+    return text;
+  }
+  for(const block of copy.blocks){
+    if(typeof block.content==='string')block.content=await convert(block.content);
+    for(const key of ['items','header'])if(Array.isArray(block[key]))block[key]=await Promise.all(block[key].map(value=>typeof value==='string'?convert(value):value));
+    if(Array.isArray(block.rows))block.rows=await Promise.all(block.rows.map(row=>Promise.all(row.map(convert))));
+  }
+  return copy;
+}
 export async function docx(doc,settings,name){
   if(!window.docx)await load('./vendor/docx.umd.js');
   if(!window.docx)throw new Error('Word 导出组件加载失败');
   const localSettings={...settings,fonts:{...settings.fonts}};
   if(/Mac|iPhone|iPad/i.test(navigator.platform)&&localSettings.fonts.body==='Microsoft YaHei')localSettings.fonts.body='PingFang SC';
   if(/Mac|iPhone|iPad/i.test(navigator.platform)&&localSettings.fonts.heading==='Microsoft YaHei')localSettings.fonts.heading=localSettings.fonts.body;
-  const file=buildDocx(doc,localSettings,window.docx);
-  download(await window.docx.Packer.toBlob(file),`${name}.docx`);
+  const file=buildDocx(await inlineImagesAsData(doc),localSettings,window.docx);
+  return await window.docx.Packer.toBlob(file);
 }

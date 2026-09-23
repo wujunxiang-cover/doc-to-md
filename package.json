@@ -1,10 +1,13 @@
 {
+  "type": "module",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "docx": "^8.5.0",
     "html2canvas": "^1.4.1",
+    "jszip": "^3.10.2",
     "katex": "^0.18.0",
     "markdown-it": "15.0.2",
     "markdown-it-mark": "4.0.0",
