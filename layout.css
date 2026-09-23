@@ -78,7 +78,9 @@ button:disabled{opacity:.56;cursor:wait;transform:none}
 .export-dialog menu{padding:14px 0 0;margin:10px 0 0;border-top:1px solid var(--line)}
 .export-dialog .primary{background:var(--blue);border-color:var(--blue);color:#fff}
 .preview-open{overflow:hidden}
+#settings-panel{top:58px;height:calc(100vh - 58px)}
 @media(max-width:760px){
+  #settings-panel{top:56px;height:calc(100dvh - 56px)}
   .app-header{height:58px;padding:0 10px}.brand{font-size:16px}.privacy{display:none}
   .header-actions{gap:5px}.header-actions>button{font-size:12px;padding:7px 8px}
   .workspace-bar{display:flex;height:42px;padding:0 7px;gap:2px;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:thin}.workspace-bar .tool-button,.workspace-bar .quiet-button{flex:0 0 auto;padding:6px 8px;font-size:12px}.workspace-bar .bar-spacer{display:none}
@@ -96,3 +98,12 @@ button:disabled{opacity:.56;cursor:wait;transform:none}
   .page-stage,.page-stage.continuous{padding:0;background:#fff;overflow:visible}
   .document,.page-stage.page .document{box-shadow:none;max-width:none;width:auto;min-height:0;padding:12mm}
 }
+.document p:not(.document-title,.document-intro){text-indent:var(--first-line-indent);letter-spacing:var(--letter-spacing)}
+.document h1,.document h2,.document h3{font-family:var(--heading-font);letter-spacing:var(--letter-spacing)}
+.document h1{font-weight:var(--h1-weight);text-align:var(--h1-align);margin-top:var(--h1-before)!important;margin-bottom:var(--h1-after)!important}
+.document h2{font-weight:var(--h2-weight);text-align:var(--h2-align);margin-top:var(--h2-before)!important;margin-bottom:var(--h2-after)!important}
+.document h3{font-weight:var(--h3-weight);text-align:var(--h3-align);margin-top:var(--h3-before)!important;margin-bottom:var(--h3-after)!important}
+.document .explicit-list:not(.choice-list){padding-left:var(--list-indent)}
+.document .explicit-list li{margin-block:var(--list-item-space)}
+#settings-panel input[type=checkbox]{width:auto;min-height:auto;accent-color:var(--blue)}
+#custom-style-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}

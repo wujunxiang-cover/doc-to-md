@@ -79,7 +79,7 @@ function mathSource(tex){
   return source.replace(/\\([A-Za-z]+)/g,(_match,name)=>greek[name]||symbols[name]||name);
 }
 function makeRuns(text,D,settings,palette,base={},bodySize=pxToHalfPoints(Math.max(settings.sizes.body||16,17))){
-  const font=fontOptions(settings),normal={font,language:{value:'en-US',eastAsia:'zh-CN'},size:bodySize,color:palette.ink,...base};
+  const font=fontOptions(settings),normal={font,language:{value:'en-US',eastAsia:'zh-CN'},size:bodySize,color:palette.ink,characterSpacing:Math.round((settings.paragraph.letterSpacing||0)*15),...base};
   const tokens=/!\[[^\]]*\]\([^)]+\)|\\\([\s\S]+?\\\)|\$(?!\$)[^$\n]+\$|`[^`\n]+`|\*\*[\s\S]+?\*\*|__[\s\S]+?__|~~[\s\S]+?~~|==[\s\S]+?==|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_)|\^[^^\n]+\^|(?<!~)~[^~\n]+~(?!~)|\[[^\]]+\]\([^)]+\)/g;
   const result=[];
   const add=(value,options={})=>{
@@ -137,22 +137,23 @@ function pageDimensions(settings){
 function blockParagraphs(block,D,settings,palette){
   const bodySize=Math.max(settings.sizes.body||16,17),spacing=Math.round((settings.paragraph.spacing||16)*11.25),line=lineTwips(bodySize,Math.max(1.55,settings.paragraph.lineHeight||1.7)),font=fontOptions(settings);
   const text=block.content||'';
-  if(block.type==='title')return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel.HEADING_1,keepNext:true,spacing:{before:0,after:Math.round(spacing*1.2),line:lineTwips(bodySize+12,1.25)},run:{bold:true,color:palette.ink,size:pxToHalfPoints((settings.sizes.h1||32)+8),font:{...font,eastAsia:settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})];
+  if(block.type==='title'){const style=settings.headings.h1;return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel.HEADING_1,alignment:D.AlignmentType[style.align.toUpperCase()],keepNext:true,spacing:{before:0,after:Math.round(spacing*1.2),line:lineTwips(bodySize+12,1.25)},run:{bold:style.bold,color:palette.ink,size:pxToHalfPoints((settings.sizes.h1||32)+8),font:{...font,eastAsia:settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})]}
   if(block.type==='heading'){
-    const level=Math.min(Math.max(block.level||1,1),3),size=settings.sizes[`h${level}`]||({1:32,2:24,3:19})[level];
-    return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel[`HEADING_${level}`],keepNext:true,spacing:{before:level===1?330:level===2?260:190,after:145,line:lineTwips(size,1.28)},run:{bold:true,color:palette.ink,size:pxToHalfPoints(size),font:{...font,eastAsia:settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})];
+    const level=Math.min(Math.max(block.level||1,1),3),levelStyle=settings.headings[`h${level}`],size=settings.sizes[`h${level}`]||({1:32,2:24,3:19})[level];
+    return [paragraph(D,text,settings,palette,{heading:D.HeadingLevel[`HEADING_${level}`],alignment:D.AlignmentType[levelStyle.align.toUpperCase()],keepNext:true,spacing:{before:Math.round(levelStyle.before*15),after:Math.round(levelStyle.after*15),line:lineTwips(size,1.28)},run:{bold:levelStyle.bold,color:palette.ink,size:pxToHalfPoints(size),font:{...font,eastAsia:settings.fonts.heading||settings.fonts.body||'Microsoft YaHei'}}})];
   }
   if(block.type==='intro')return [paragraph(D,text,settings,palette,{spacing:{after:Math.round(spacing*1.5),line:lineTwips(bodySize,1.8)},run:{color:palette.muted,size:pxToHalfPoints(bodySize)}})];
-  if(block.type==='paragraph')return [paragraph(D,text,settings,palette,{alignment:D.AlignmentType.LEFT,spacing:{after:spacing,line},keepLines:true})];
+  if(block.type==='paragraph')return [paragraph(D,text,settings,palette,{alignment:D.AlignmentType.LEFT,indent:settings.paragraph.firstLineIndent?{firstLine:Math.round(settings.paragraph.firstLineIndent*bodySize*15)}:undefined,spacing:{after:spacing,line},keepLines:true})];
   if(block.type==='question'||block.type==='answerItem'){
     const number=block.number||'';
     const marker=new D.TextRun({text:`${number} `,font,size:pxToHalfPoints(bodySize),bold:true,color:block.type==='answerItem'?palette.accent:palette.ink});
     return [new D.Paragraph({children:[marker,...makeRuns(text,D,settings,palette)],indent:{left:420,hanging:420},keepNext:block.type==='question'&&block.kind==='choice',keepLines:true,spacing:{before:100,after:110,line}})];
   }
   if(block.type==='answerNote')return [paragraph(D,text,settings,palette,{spacing:{before:100,after:140,line},run:{color:palette.muted}})];
-  if(block.type==='bulletList')return block.items.map(item=>new D.Paragraph({children:makeRuns(item,D,settings,palette),bullet:{level:0},indent:{left:440,hanging:220},keepLines:true,spacing:{after:85,line}}));
-  if(block.type==='orderedList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${block.numbers?.[index]||`${index+1}.`} `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:440,hanging:440},keepLines:true,spacing:{after:85,line}}));
-  if(block.type==='choiceList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${String.fromCharCode(65+index)}. `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:480,hanging:300},keepLines:true,spacing:{after:75,line}}));
+  const listIndent=Math.round(settings.list.indent*15),listSpacing=Math.round(settings.list.spacing*11.25);
+  if(block.type==='bulletList')return block.items.map(item=>new D.Paragraph({children:makeRuns(item,D,settings,palette),bullet:{level:0},indent:{left:listIndent,hanging:Math.min(listIndent,240)},keepLines:true,spacing:{after:listSpacing,line}}));
+  if(block.type==='orderedList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${block.numbers?.[index]||`${index+1}.`} `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
+  if(block.type==='choiceList')return block.items.map((item,index)=>new D.Paragraph({children:[new D.TextRun({text:`${String.fromCharCode(65+index)}. `,font,bold:true,color:palette.accent}),...makeRuns(item,D,settings,palette)],indent:{left:listIndent,hanging:Math.min(listIndent,300)},keepLines:true,spacing:{after:listSpacing,line}}));
   if(block.type==='blockquote')return block.content.split('\n').map(lineText=>paragraph(D,lineText,settings,palette,{indent:{left:360,right:180},border:{left:{color:palette.accent,space:8,style:'single',size:16}},shading:{fill:palette.pale},spacing:{before:45,after:110,line},keepLines:true}));
   if(block.type==='codeBlock'){
     const codeFont=settings.fonts.code||'Consolas',codeRuns=block.content.split('\n').map((lineText,index)=>new D.TextRun({text:lineText||' ',...(index?{break:1}:{}),font:{ascii:codeFont,hAnsi:codeFont,eastAsia:codeFont},size:pxToHalfPoints(Math.max(settings.sizes.code||13,13)),color:'F0F3F8'}));
